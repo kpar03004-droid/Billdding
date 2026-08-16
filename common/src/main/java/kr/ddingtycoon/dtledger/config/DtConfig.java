@@ -177,15 +177,63 @@ public final class DtConfig {
             cfg = new DtConfig();
         }
         cfg.path = p;
+        cfg.normalizeAfterLoad();
         cfg.save();
         return cfg;
+    }
+
+    /**
+     * 역직렬화 직후 수치 필드를 유효 범위로 보정한다.
+     *
+     * <p>설정 화면(GUI)은 잘못된 값을 넣지 못하게 막지만, 유저가 config.json 을 직접 편집하면
+     * 방어할 곳이 없다(예: dayResetHour=99). hudScale·HUD 비율은 사용 시점마다 clamp 되지만
+     * 나머지 수치는 그대로 쓰이므로 여기서 한 번 정리한다. 각 범위는 필드 주석에 적힌 값과 같다.
+     */
+    void normalizeAfterLoad() {
+        dayResetHour = clampInt(dayResetHour, 0, 23);
+        hudOpacity = clampFloat(hudOpacity, 0.2f, 1.0f, 1.0f);
+        fleaSaleFeePercent = clampDouble(fleaSaleFeePercent, 0.0, 100.0, 5.0);
+        matchWindowMs = clampLong(matchWindowMs, 200, 60_000);
+        hudXRatio = isRatioSet(hudXRatio) ? clampRatio(hudXRatio) : -1;
+        hudYRatio = isRatioSet(hudYRatio) ? clampRatio(hudYRatio) : -1;
+        if (vaultLimit <= 0) vaultLimit = 20_000_000; // 0·음수 한도는 % 계산을 깨뜨린다
+    }
+
+    private static int clampInt(int v, int min, int max) {
+        return v < min ? min : v > max ? max : v;
+    }
+
+    private static long clampLong(long v, long min, long max) {
+        return v < min ? min : v > max ? max : v;
+    }
+
+    /** 유한하고 범위 안이면 그대로, 아니면 보정(손상된 NaN/무한대는 기본값). */
+    private static float clampFloat(float v, float min, float max, float def) {
+        if (!Float.isFinite(v)) return def;
+        return v < min ? min : v > max ? max : v;
+    }
+
+    private static double clampDouble(double v, double min, double max, double def) {
+        if (!Double.isFinite(v)) return def;
+        return v < min ? min : v > max ? max : v;
     }
 
     public void save() {
         if (path == null) return; // load() 전 호출 방지
         try {
             Files.createDirectories(path.getParent());
-            Files.writeString(path, GSON.toJson(this));
+            // 임시 파일에 먼저 쓰고 원자적으로 교체 — Files.writeString 은 기존 파일을 먼저
+            // 0바이트로 자르므로, 쓰는 도중 게임이 죽으면 설정이 통째로 날아간다. 저장은
+            // load() 마다·HUD 이동·금고 변동마다 일어나 빈도가 높다. (LedgerStore.writeFile 과 동형)
+            Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
+            Files.writeString(tmp, GSON.toJson(this));
+            try {
+                Files.move(tmp, path, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                // 일부 환경(네트워크 드라이브·OneDrive 등)은 원자적 이동을 지원하지 않는다
+                Files.move(tmp, path, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             LOG.warn("[dtledger] 설정 저장 실패", e);
         }
