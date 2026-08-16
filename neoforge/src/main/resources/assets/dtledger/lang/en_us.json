@@ -1,0 +1,11 @@
+{
+  "dtledger.name": "Dt Ledger",
+  "dtledger.key.category": "Dt Ledger",
+  "dtledger.key.toggle_hud": "Toggle HUD",
+  "dtledger.key.open_stats": "Open Stats Screen",
+  "dtledger.key.open_config": "Open Config",
+  "dtledger.hud.today_net": "Today Net",
+  "dtledger.hud.income": "Income",
+  "dtledger.hud.expense": "Expense",
+  "dtledger.config.title": "Dt Ledger Settings"
+}

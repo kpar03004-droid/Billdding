@@ -1,0 +1,29 @@
+modLoader="javafml"
+loaderVersion="[1,)"
+license="MIT"
+
+[[mods]]
+modId="billding"
+version="${version}"
+displayName="빌띵"
+authors="아카"
+description='''
+띵타이쿤 골드 수입/지출/이체를 자동 집계해 HUD·명령어로 보여주는 클라이언트 전용 QoL 모드. 화면에 이미 보이는 정보(잔고·채팅)만 재구성합니다.
+'''
+
+[[dependencies.billding]]
+    modId="neoforge"
+    type="required"
+    versionRange="[21.4,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.billding]]
+    modId="minecraft"
+    type="required"
+    versionRange="[1.21.4]"
+    ordering="NONE"
+    side="BOTH"
+
+[[mixins]]
+config="dtledger.neoforge.mixins.json"

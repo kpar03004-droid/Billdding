@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "kr.ddingtycoon.dtledger.neoforge.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "PlayerTabOverlayAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

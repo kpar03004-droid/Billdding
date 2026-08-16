@@ -1,0 +1,12 @@
+{
+  "dtledger.name": "빌띵",
+  "dtledger.key.category": "빌띵",
+  "dtledger.key.toggle_hud": "Toggle HUD",
+  "dtledger.key.open_stats": "Open Stats Screen",
+  "dtledger.key.edit_hud": "Edit HUD Position",
+  "dtledger.key.open_config": "Open Config",
+  "dtledger.hud.today_net": "Today Net",
+  "dtledger.hud.income": "Income",
+  "dtledger.hud.expense": "Expense",
+  "dtledger.config.title": "Dt Ledger Settings"
+}

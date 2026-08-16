@@ -1,0 +1,11 @@
+{
+  "dtledger.name": "Dt Ledger",
+  "dtledger.key.category": "Dt Ledger",
+  "dtledger.key.toggle_hud": "HUD 표시 전환",
+  "dtledger.key.open_stats": "정산 창 열기",
+  "dtledger.key.open_config": "설정 열기",
+  "dtledger.hud.today_net": "오늘 순익",
+  "dtledger.hud.income": "수입",
+  "dtledger.hud.expense": "지출",
+  "dtledger.config.title": "Dt Ledger 설정"
+}

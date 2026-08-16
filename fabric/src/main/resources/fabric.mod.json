@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "billding",
+  "version": "${version}",
+  "name": "빌띵",
+  "description": "띵타이쿤 골드 수입/지출/이체를 자동 집계해 HUD·명령어로 보여주는 클라이언트 전용 QoL 모드. 화면에 이미 보이는 정보(잔고·채팅)만 재구성합니다.",
+  "authors": [
+    "아카"
+  ],
+  "contact": {
+    "sources": "https://ddingtycoon.kr"
+  },
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "kr.ddingtycoon.dtledger.DtLedgerClient"
+    ]
+  },
+  "mixins": [
+    "dtledger.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.4",
+    "java": ">=21",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "yet_another_config_lib_v3": "*"
+  }
+}

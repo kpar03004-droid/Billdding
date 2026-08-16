@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "kr.ddingtycoon.dtledger.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "PlayerListHudAccessor",
+    "BossBarHudAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
