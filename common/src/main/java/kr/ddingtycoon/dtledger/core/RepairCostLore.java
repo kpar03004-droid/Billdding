@@ -32,6 +32,13 @@ public final class RepairCostLore {
             Pattern.compile("강화\\s*비용\\s*[:：]\\s*([\\d,]+)\\s*골드");
 
     /**
+     * 장비 각인 비용. 강화와 같은 형식이다 — 2026-08-18 실측:
+     * "- 각인 비용 : 500,000골드, 3루비". 골드만 잡고 루비는 무시한다.
+     */
+    private static final Pattern ENGRAVE_COST =
+            Pattern.compile("각인\\s*비용\\s*[:：]\\s*([\\d,]+)\\s*골드");
+
+    /**
      * lore 한 줄이 수리 비용이면 금액, 아니면 null.
      *
      * <p><b>0 과 null 을 반드시 구분한다</b> — "수리 소모 골드 : 0골드"(무료 수리)와
@@ -51,6 +58,11 @@ public final class RepairCostLore {
     /** lore 한 줄이 장비 강화 비용이면 골드 금액, 아니면 null. 같은 줄의 루비는 무시. */
     public static Long parseEnhanceCost(String loreLine) {
         return first(ENHANCE_COST, loreLine);
+    }
+
+    /** lore 한 줄이 장비 각인 비용이면 골드 금액, 아니면 null. 같은 줄의 루비는 무시. */
+    public static Long parseEngraveCost(String loreLine) {
+        return first(ENGRAVE_COST, loreLine);
     }
 
     private static Long first(Pattern p, String line) {

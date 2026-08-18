@@ -42,10 +42,43 @@ public final class GuiLoreScan {
         return lastQuestSnapshot;
     }
 
-    /** 바다의 가호 강화창 → (소모 골드 → 능력치명). */
+    /** 바다의 가호 강화창 → (소모 골드 → 능력치명). ΔG 폴백용(현재 이 서버는 ΔG 불가). */
     public static Map<Long, String> seaBlessing(MinecraftClient client) {
         return scan(client, SeaBlessingTracker.GUI_SIGNATURE,
                 SeaBlessingTracker::parseCostGold, SeaBlessingTracker::abilityLabel);
+    }
+
+    /**
+     * 바다의 가호 강화창 → 능력치별 (이름·현재 단계·다음 비용) 목록.
+     * 단계 상승으로 강화 성공을 감지하려는 것 — 잔고를 못 읽는 서버에서 유일하게 확실한 신호.
+     */
+    public static java.util.List<SeaBlessingTracker.Ability> seaBlessingAbilities(MinecraftClient client) {
+        if (client == null || !(client.currentScreen instanceof HandledScreen<?> screen)) {
+            return java.util.List.of();
+        }
+        java.util.List<SeaBlessingTracker.Ability> out = new java.util.ArrayList<>();
+        boolean matched = false;
+        for (Slot slot : screen.getScreenHandler().slots) {
+            ItemStack stack = slot.getStack();
+            if (stack.isEmpty()) continue;
+            LoreComponent lore = stack.get(DataComponentTypes.LORE);
+            if (lore == null) continue;
+            String rawName = stack.getName().getString();
+            if (rawName.contains(SeaBlessingTracker.GUI_SIGNATURE)) matched = true;
+            long cost = 0;
+            for (Text line : lore.lines()) {
+                String t = line.getString();
+                if (t.contains(SeaBlessingTracker.GUI_SIGNATURE)) matched = true;
+                long c = SeaBlessingTracker.parseCostGold(t);
+                if (c > 0) cost = c;
+            }
+            int level = SeaBlessingTracker.parseLevel(rawName);
+            String label = SeaBlessingTracker.abilityLabel(rawName);
+            if (cost > 0 && level >= 0 && !label.isEmpty()) {
+                out.add(new SeaBlessingTracker.Ability(label, level, cost));
+            }
+        }
+        return matched ? out : java.util.List.of();
     }
 
     /**
@@ -112,7 +145,19 @@ public final class GuiLoreScan {
                 // 장비 강화 창(로니 → 도구 강화하기) — "강화 비용 : 700,000골드, 10루비"
                 Long enhance = kr.ddingtycoon.dtledger.core.RepairCostLore.parseEnhanceCost(text);
                 if (enhance != null) out.put(kr.ddingtycoon.dtledger.core.TradeSignal.Type.WEAPON_ENHANCE, enhance);
+                // 장비 각인 창 — "각인 비용 : 500,000골드, 3루비"(강화와 같은 형식)
+                Long engrave = kr.ddingtycoon.dtledger.core.RepairCostLore.parseEngraveCost(text);
+                if (engrave != null) out.put(kr.ddingtycoon.dtledger.core.TradeSignal.Type.ENGRAVE, engrave);
             }
+        }
+        // 진단 반영 — 이 경로로 읽은 비용을 '최근 창에서 읽은 내용'에 남긴다.
+        // (그동안은 바다의 가호 스캔 결과만 떠서, 각인/강화 창인데 "서명 없음"으로 보였다.)
+        if (!out.isEmpty()) {
+            java.util.List<String> snap = new java.util.ArrayList<>();
+            snap.add("§a수리/강화/각인 창 인식 — 읽은 비용:");
+            out.forEach((type, cost) -> snap.add("§8· §f" + type + " §7→ §f" + cost + "골드"));
+            snap.add("§7이 비용은 실제로 강화/각인을 해야 지출로 기록됩니다.");
+            lastSnapshot = snap;
         }
         return out;
     }

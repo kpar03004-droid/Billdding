@@ -54,6 +54,19 @@ class RepairCostTest {
         assertNull(RepairCostLore.parseRepairCost("  - 강화 비용 : 700,000골드, 10루비"));
     }
 
+    @Test
+    void 각인_비용은_강화와_같은_형식이고_골드만_읽는다() {
+        // 2026-08-18 실측: "- 각인 비용 : 500,000골드, 3루비"
+        assertEquals(500_000L, RepairCostLore.parseEngraveCost("  - 각인 비용 : 500,000골드, 3루비"),
+                "루비를 금액에 섞으면 안 됨");
+        assertEquals(1_200_000L, RepairCostLore.parseEngraveCost("- 각인 비용: 1,200,000 골드"));
+        // 강화 비용과 서로 섞이지 않는다
+        assertNull(RepairCostLore.parseEngraveCost("  - 강화 비용 : 700,000골드, 10루비"));
+        assertNull(RepairCostLore.parseEnhanceCost("  - 각인 비용 : 500,000골드, 3루비"));
+        // 재료 부족 등으로 비용 줄이 없으면 null
+        assertNull(RepairCostLore.parseEngraveCost("  ❗ 각인 재료를 넣어주세요."));
+    }
+
     // ── 잔고 오독 방어 ──
 
     /**
@@ -76,6 +89,29 @@ class RepairCostTest {
      * 실측: 실제 잔고 3,315,718 인데 100,000 으로 읽어 ΔG −3,220,718 이 만들어졌고,
      * 5,000골드 강화가 322만짜리로 뒤바뀔 뻔했다.
      */
+    /**
+     * 2026-08-18 실측 — 의뢰 트래커의 "상점에서 골드 소모하기 (0/100,000)" 를 잔고로 읽어
+     * 목표 금액 100,000 을 잔고로 오인했다(실제 잔고는 13,869,528). 그 퀘스트 줄에 "골드"
+     * 글자가 있어 마커와 충돌한 게 함정. 진행도 줄은 무조건 배제해야 한다.
+     */
+    @Test
+    void 의뢰_진행도_줄을_잔고로_읽지_않는다() {
+        BalanceExtractor ex = new BalanceExtractor();
+        String marker = "골드", regex = "([0-9][0-9,]{2,})";
+
+        // 퀘스트 줄이 "골드"를 품고 있어도 잔고로 뽑히면 안 된다
+        assertNull(ex.extract(
+                List.of("상점에서 골드 소모하기 (0/100,000)", "세렌트 채굴하기 (0/30)"),
+                marker, regex),
+                "진행도 줄만 있으면 잔고 없음(null)");
+
+        // 진짜 잔고(아이콘+숫자, '골드' 글자 없음)가 섞여 있으면 그걸 잡아야 한다
+        assertEquals(13_869_528L, ex.extract(
+                List.of("상점에서 골드 소모하기 (0/100,000)", " 13,869,528", "감자 심기 (0/96)"),
+                marker, regex),
+                "퀘스트 줄을 걸러내고 진짜 잔고를 잡는다");
+    }
+
     @Test
     void 골드_줄이_사라지면_다른_숫자로_갈아타지_않는다() {
         BalanceExtractor ex = new BalanceExtractor();

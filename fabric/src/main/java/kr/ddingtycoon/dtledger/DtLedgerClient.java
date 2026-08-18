@@ -38,6 +38,9 @@ import java.util.function.Consumer;
 public final class DtLedgerClient implements ClientModInitializer {
     private static final Logger LOG = LoggerFactory.getLogger("dtledger");
 
+    /** GUI lore 스캔 주기(틱). 3 = 약 150ms 마다 → 매 틱 대비 호출 1/3, 지연은 사람이 못 느낌. */
+    private static final int GUI_SCAN_INTERVAL = 3;
+
     @Override
     public void onInitializeClient() {
         java.nio.file.Path dir = net.fabricmc.loader.api.FabricLoader.getInstance()
@@ -101,13 +104,27 @@ public final class DtLedgerClient implements ClientModInitializer {
         }
 
         // 메인 틱 펌프: 강화창 상태 갱신 → 잔고 감지 → 결합 확정 → 저장 flush
+        final int[] guiScanTick = {0};
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             long now = System.currentTimeMillis();
-            seaBlessing.updateGui(kr.ddingtycoon.dtledger.watcher.GuiLoreScan.seaBlessing(client));
-            questReward.updateGui(kr.ddingtycoon.dtledger.watcher.GuiLoreScan.questEntries(client));
-            kr.ddingtycoon.dtledger.watcher.GuiLoreScan.repairCosts(client).forEach(resolver::noteGuiCost);
-            resolver.noteSkillCosts(kr.ddingtycoon.dtledger.watcher.GuiLoreScan.skillUpgradeCosts(client));
-            balanceWatcher.tick(client, now);
+
+            // GUI lore 스캔(4종)은 컨테이너 창이 열려 있을 때만, 그리고 GUI_SCAN_INTERVAL 틱에 한 번만.
+            // - 창이 닫혀 있으면 네 스캔 모두 즉시 빈 결과라 호출 자체가 낭비다.
+            // - 열려 있어도 매 틱(20Hz) 전 슬롯 lore 를 훑을 필요는 없다. 강화 비용줄·단계 변화는
+            //   수십 ms 안에만 잡으면 되므로 3틱(약 150ms)마다면 충분하다. → 호출 1/3.
+            // ⚠️ "슬롯 내용이 같으면 스킵" 방식은 쓰지 않는다 — 강화 비용줄은 아이템이 안 바뀌어도
+            //    호버 시 lore 에만 나타나므로, 그 방식은 강화·각인 비용을 놓친다(2026-08 실측).
+            if (client.currentScreen instanceof net.minecraft.client.gui.screen.ingame.HandledScreen<?>
+                    && ++guiScanTick[0] % GUI_SCAN_INTERVAL == 0) {
+                seaBlessing.updateGui(kr.ddingtycoon.dtledger.watcher.GuiLoreScan.seaBlessing(client));
+                // 이 서버는 잔고를 그림으로 그려 ΔG 를 못 읽는다 → 창의 강화 단계 상승으로 지출을 잡는다.
+                seaBlessing.noteWindow(kr.ddingtycoon.dtledger.watcher.GuiLoreScan.seaBlessingAbilities(client));
+                questReward.updateGui(kr.ddingtycoon.dtledger.watcher.GuiLoreScan.questEntries(client));
+                kr.ddingtycoon.dtledger.watcher.GuiLoreScan.repairCosts(client).forEach(resolver::noteGuiCost);
+                resolver.noteSkillCosts(kr.ddingtycoon.dtledger.watcher.GuiLoreScan.skillUpgradeCosts(client));
+            }
+
+            balanceWatcher.tick(client, now);   // 시간 기반 — 매 틱 유지
             resolver.tick(now);
             store.tick(now);
         });

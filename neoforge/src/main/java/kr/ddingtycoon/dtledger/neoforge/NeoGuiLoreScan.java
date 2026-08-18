@@ -29,6 +29,36 @@ public final class NeoGuiLoreScan {
                 SeaBlessingTracker::parseCostGold, SeaBlessingTracker::abilityLabel);
     }
 
+    /** 바다의 가호 강화창 → 능력치별 (이름·현재 단계·다음 비용). 단계 상승으로 강화 감지. */
+    public static java.util.List<SeaBlessingTracker.Ability> seaBlessingAbilities(Minecraft mc) {
+        if (mc == null || !(mc.screen instanceof AbstractContainerScreen<?> screen)) {
+            return java.util.List.of();
+        }
+        java.util.List<SeaBlessingTracker.Ability> out = new java.util.ArrayList<>();
+        boolean matched = false;
+        for (Slot slot : screen.getMenu().slots) {
+            ItemStack stack = slot.getItem();
+            if (stack.isEmpty()) continue;
+            ItemLore lore = stack.get(DataComponents.LORE);
+            if (lore == null) continue;
+            String rawName = stack.getHoverName().getString();
+            if (rawName.contains(SeaBlessingTracker.GUI_SIGNATURE)) matched = true;
+            long cost = 0;
+            for (Component line : lore.lines()) {
+                String t = line.getString();
+                if (t.contains(SeaBlessingTracker.GUI_SIGNATURE)) matched = true;
+                long c = SeaBlessingTracker.parseCostGold(t);
+                if (c > 0) cost = c;
+            }
+            int level = SeaBlessingTracker.parseLevel(rawName);
+            String label = SeaBlessingTracker.abilityLabel(rawName);
+            if (cost > 0 && level >= 0 && !label.isEmpty()) {
+                out.add(new SeaBlessingTracker.Ability(label, level, cost));
+            }
+        }
+        return matched ? out : java.util.List.of();
+    }
+
     /**
      * 의뢰 게시판(일일·주간 각각 별도 창) → 의뢰 목록(이름·보상액·수령여부).
      * 수령 여부까지 읽어야 "미수령 → 수령" 전환으로 수령 시점을 직접 잡을 수 있다.
@@ -86,6 +116,9 @@ public final class NeoGuiLoreScan {
                 // 장비 강화 창(로니 → 도구 강화하기) — "강화 비용 : 700,000골드, 10루비"
                 Long enhance = kr.ddingtycoon.dtledger.core.RepairCostLore.parseEnhanceCost(text);
                 if (enhance != null) out.put(kr.ddingtycoon.dtledger.core.TradeSignal.Type.WEAPON_ENHANCE, enhance);
+                // 장비 각인 창 — "각인 비용 : 500,000골드, 3루비"(강화와 같은 형식)
+                Long engrave = kr.ddingtycoon.dtledger.core.RepairCostLore.parseEngraveCost(text);
+                if (engrave != null) out.put(kr.ddingtycoon.dtledger.core.TradeSignal.Type.ENGRAVE, engrave);
             }
         }
         return out;

@@ -72,6 +72,7 @@ public final class BalanceExtractor {
 
         for (String line : lines) {
             if (line == null || line.isEmpty()) continue;
+            if (isNonBalanceLine(line)) continue;        // 퀘스트 진행도 줄은 잔고가 아니다
             boolean hasMarker = marker != null && !marker.isEmpty() && line.contains(marker);
             if (markerSeen && !hasMarker) continue;      // 마커 줄을 이미 봤으면 나머지는 무시
             if (hasMarker && !markerSeen) {              // 첫 마커 줄 — 그동안 고른 건 버린다
@@ -101,6 +102,7 @@ public final class BalanceExtractor {
         Long best = null;
         for (String line : lines) {
             if (line == null || line.isEmpty()) continue;
+            if (isNonBalanceLine(line)) continue;
             if (!shape.equals(shapeOf(line))) continue;
             Matcher m = p.matcher(line);
             while (m.find()) {
@@ -110,6 +112,22 @@ public final class BalanceExtractor {
         }
         return best;
     }
+
+    /**
+     * 잔고로 읽으면 안 되는 줄인가.
+     *
+     * <p>의뢰 트래커의 진행도 줄이 대표적이다 — "상점에서 골드 소모하기 (0/100,000)".
+     * 이런 줄은 "골드"라는 글자까지 들어 있어(마커와 충돌) 진짜 잔고보다 먼저 채택돼 버렸고,
+     * 목표 금액 100,000 을 잔고로 오인해 거대한 가짜 ΔG 를 만들었다(2026-08-18 실측).
+     * "(현재/목표)" 꼴 괄호 분수는 잔고가 가질 수 없는 모양이므로 통째로 배제한다.
+     */
+    static boolean isNonBalanceLine(String line) {
+        return QUEST_PROGRESS.matcher(line).find();
+    }
+
+    /** "(0/100,000)" · "(3 / 30)" 처럼 괄호 안 현재/목표 분수. */
+    private static final Pattern QUEST_PROGRESS =
+            Pattern.compile("\\(\\s*[0-9][0-9,]*\\s*/\\s*[0-9][0-9,]*\\s*\\)");
 
     /**
      * 숫자를 지운 줄 모양. "󐀃 3,315,718" → "󐀃 #"

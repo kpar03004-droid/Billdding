@@ -192,6 +192,13 @@ public final class DtStatCommand {
                 : "§7읽은 수리 비용: §f" + costs);
         String read = kr.ddingtycoon.dtledger.watcher.BalanceWatcher.lastReadInfo();
         send(src, read == null ? "§c잔고를 아직 한 번도 못 읽음" : "§7잔고 읽기: §f" + read);
+
+        // 잔고 후보 전체 덤프 — 진짜 잔고가 읽히는 줄에 있는지, 어느 줄이 오인됐는지 눈으로 확인.
+        String dump = kr.ddingtycoon.dtledger.watcher.BalanceWatcher.lastCandidateDump();
+        if (dump != null && !dump.isBlank()) {
+            send(src, "§6=== 잔고 후보 줄(소스별) — 진짜 잔고가 여기 있나? ===");
+            for (String line : dump.split("\n")) if (!line.isBlank()) send(src, line);
+        }
         String delta = kr.ddingtycoon.dtledger.core.TransactionResolver.lastDeltaInfo();
         send(src, delta == null ? "§c감지된 잔고 변동 없음" : "§7최근 잔고 변동: §f" + delta);
         String settle = kr.ddingtycoon.dtledger.core.TransactionResolver.lastSettleInfo();

@@ -46,6 +46,10 @@ public final class NeoBalanceWatcher {
 
     public static String lastReadInfo() { return lastReadInfo; }
 
+    /** 잔고 후보로 읽을 수 있는 모든 줄(소스별) 덤프 — 진짜 잔고가 후보에 있는지 확인용. */
+    private static volatile String lastCandidateDump;
+    public static String lastCandidateDump() { return lastCandidateDump; }
+
     private static final int SETTLE_TICKS = 40;   // 월드 전환 후 이만큼 기준선만 따라감(로드 중 오탐 방지)
 
     private final Map<String, Long> bossBarLines = new LinkedHashMap<>(); // 텍스트 → 마지막 목격 시각
@@ -136,19 +140,29 @@ public final class NeoBalanceWatcher {
     private Long readBalance(Minecraft mc) {
         List<String> lines = new ArrayList<>();
         String mode = config.balanceSourceMode == null ? "AUTO" : config.balanceSourceMode.toUpperCase();
+        StringBuilder dump = new StringBuilder();
         switch (mode) {
-            case "SCOREBOARD" -> lines.addAll(scoreboardLines(mc));
-            case "BOSSBAR" -> lines.addAll(bossBarLines.keySet());
-            case "TABLIST" -> lines.addAll(tabListLines(mc));
-            case "ACTIONBAR" -> lines.add(lastActionBar);
+            case "SCOREBOARD" -> collect(dump, "스코어보드", scoreboardLines(mc), lines);
+            case "BOSSBAR" -> collect(dump, "보스바", new ArrayList<>(bossBarLines.keySet()), lines);
+            case "TABLIST" -> collect(dump, "탭리스트", tabListLines(mc), lines);
+            case "ACTIONBAR" -> collect(dump, "액션바", List.of(lastActionBar), lines);
             default -> { // AUTO
-                lines.addAll(scoreboardLines(mc));
-                lines.addAll(bossBarLines.keySet());
-                lines.addAll(tabListLines(mc));
-                lines.add(lastActionBar);
+                collect(dump, "스코어보드", scoreboardLines(mc), lines);
+                collect(dump, "보스바", new ArrayList<>(bossBarLines.keySet()), lines);
+                collect(dump, "탭리스트", tabListLines(mc), lines);
+                collect(dump, "액션바", List.of(lastActionBar), lines);
             }
         }
+        lastCandidateDump = dump.length() == 0 ? "§c읽을 수 있는 줄이 하나도 없음" : dump.toString();
         return extractor.extract(lines, config.balanceMarker, config.balanceRegex);
+    }
+
+    private static void collect(StringBuilder dump, String label, List<String> src, List<String> into) {
+        for (String line : src) {
+            if (line == null || line.isEmpty()) continue;
+            into.add(line);
+            dump.append("§8[").append(label).append("] §7").append(line).append('\n');
+        }
     }
 
     List<String> scoreboardLines(Minecraft mc) {

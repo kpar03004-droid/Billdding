@@ -38,6 +38,14 @@ public final class BalanceWatcher {
 
     public static String lastReadInfo() { return lastReadInfo; }
 
+    /**
+     * 잔고 후보로 <b>모드가 실제로 읽을 수 있는 모든 줄</b>(소스별)을 덤프한다(진단용).
+     * "진짜 잔고가 후보에 있긴 한가"를 눈으로 확인하려는 것 — 없으면 텍스트 추적 자체가 불가.
+     */
+    private static volatile String lastCandidateDump;
+
+    public static String lastCandidateDump() { return lastCandidateDump; }
+
     private static final int SETTLE_TICKS = 40;   // 월드 전환 후 이만큼 기준선만 따라감(로드 중 오탐 방지)
 
     private final BalanceExtractor extractor = new BalanceExtractor();
@@ -124,18 +132,29 @@ public final class BalanceWatcher {
     private Long readBalance(MinecraftClient client) {
         List<String> lines = new ArrayList<>();
         String mode = config.balanceSourceMode == null ? "AUTO" : config.balanceSourceMode.toUpperCase();
+        StringBuilder dump = new StringBuilder();
         switch (mode) {
-            case "SCOREBOARD" -> lines.addAll(scoreboard.lines(client));
-            case "BOSSBAR" -> lines.addAll(bossbar.lines(client));
-            case "TABLIST" -> lines.addAll(tablist.lines(client));
-            case "ACTIONBAR" -> lines.add(lastActionBar);
+            case "SCOREBOARD" -> collect(dump, "스코어보드", scoreboard.lines(client), lines);
+            case "BOSSBAR" -> collect(dump, "보스바", bossbar.lines(client), lines);
+            case "TABLIST" -> collect(dump, "탭리스트", tablist.lines(client), lines);
+            case "ACTIONBAR" -> collect(dump, "액션바", List.of(lastActionBar), lines);
             default -> { // AUTO
-                lines.addAll(scoreboard.lines(client));
-                lines.addAll(bossbar.lines(client));
-                lines.addAll(tablist.lines(client));
-                lines.add(lastActionBar);
+                collect(dump, "스코어보드", scoreboard.lines(client), lines);
+                collect(dump, "보스바", bossbar.lines(client), lines);
+                collect(dump, "탭리스트", tablist.lines(client), lines);
+                collect(dump, "액션바", List.of(lastActionBar), lines);
             }
         }
+        lastCandidateDump = dump.length() == 0 ? "§c읽을 수 있는 줄이 하나도 없음" : dump.toString();
         return extractor.extract(lines, config.balanceMarker, config.balanceRegex);
+    }
+
+    /** 한 소스의 줄들을 진단 덤프에 소스 라벨과 함께 쌓고, 추출 대상 목록에도 넣는다. */
+    private static void collect(StringBuilder dump, String label, List<String> src, List<String> into) {
+        for (String line : src) {
+            if (line == null || line.isEmpty()) continue;
+            into.add(line);
+            dump.append("§8[").append(label).append("] §7").append(line).append('\n');
+        }
     }
 }

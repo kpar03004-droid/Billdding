@@ -413,7 +413,7 @@ public final class TransactionResolver {
      * 잘 동작하는 사용자가 있다(제작자 본인 확인). 창을 못 읽는 상황에서까지 버리면 손해다.
      */
     private static final java.util.EnumSet<TradeSignal.Type> GUI_COST_PREFERRED_TYPES =
-            java.util.EnumSet.of(TradeSignal.Type.WEAPON_ENHANCE);
+            java.util.EnumSet.of(TradeSignal.Type.WEAPON_ENHANCE, TradeSignal.Type.ENGRAVE);
 
     /**
      * 창에서 읽어둔 비용들로 합산 금액을 n건으로 정확히 분해한다.

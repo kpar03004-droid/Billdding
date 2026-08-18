@@ -43,6 +43,10 @@ public final class DtLedgerNeoForge {
     public static final String MOD_ID = "billding";
     private static final Logger LOG = LoggerFactory.getLogger("billding");
 
+    /** GUI lore 스캔 주기(틱). Fabric 판과 동일 — 3틱(약 150ms)마다. */
+    private static final int GUI_SCAN_INTERVAL = 3;
+    private int guiScanTick = 0;
+
     public DtLedgerNeoForge(IEventBus modBus) {
         Path dir = FMLPaths.CONFIGDIR.get().resolve("billding");
         DtConfig config = DtConfig.load(dir);
@@ -93,10 +97,19 @@ public final class DtLedgerNeoForge {
         NeoForge.EVENT_BUS.addListener((ClientTickEvent.Post e) -> {
             Minecraft mc = Minecraft.getInstance();
             long now = System.currentTimeMillis();
-            seaBlessing.updateGui(NeoGuiLoreScan.seaBlessing(mc));
-            questReward.updateGui(NeoGuiLoreScan.questEntries(mc));
-            NeoGuiLoreScan.repairCosts(mc).forEach(resolver::noteGuiCost);
-            resolver.noteSkillCosts(NeoGuiLoreScan.skillUpgradeCosts(mc));
+
+            // GUI lore 스캔은 컨테이너 창이 열려 있을 때만, 3틱에 한 번만(Fabric 판과 동일 규칙).
+            // 슬롯-해시 스킵은 쓰지 않는다 — 강화/각인 비용은 호버 시 lore 에만 떠서 놓친다.
+            if (mc.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>
+                    && ++guiScanTick % GUI_SCAN_INTERVAL == 0) {
+                seaBlessing.updateGui(NeoGuiLoreScan.seaBlessing(mc));
+                // 잔고를 못 읽는 서버 대비 — 창의 강화 단계 상승으로 바다의 가호 지출을 잡는다.
+                seaBlessing.noteWindow(NeoGuiLoreScan.seaBlessingAbilities(mc));
+                questReward.updateGui(NeoGuiLoreScan.questEntries(mc));
+                NeoGuiLoreScan.repairCosts(mc).forEach(resolver::noteGuiCost);
+                resolver.noteSkillCosts(NeoGuiLoreScan.skillUpgradeCosts(mc));
+            }
+
             balanceWatcher.tick(mc, now);
             resolver.tick(now);
             store.tick(now);
