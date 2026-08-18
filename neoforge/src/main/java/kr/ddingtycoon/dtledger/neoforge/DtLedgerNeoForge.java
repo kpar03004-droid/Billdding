@@ -170,22 +170,26 @@ public final class DtLedgerNeoForge {
             Minecraft mc = Minecraft.getInstance();
             mc.execute(() -> {
                 if (mc.player == null) return;
-                mc.player.displayClientMessage(Component.literal("§6[빌띵] §f새 버전 §e" + release.version()
-                        + "§f 이 나왔습니다. §7(현재 " + current + ")"), false);
+                mc.player.displayClientMessage(Component.literal("§6§m                                              "), false);
+                mc.player.displayClientMessage(Component.literal("§6 ✦ §l빌띵§r§f  새 버전 §a§l" + release.version()
+                        + "§r §7(현재 " + current + ")"), false);
                 if (release.notes() != null && !release.notes().isBlank()) {
-                    mc.player.displayClientMessage(Component.literal("§8· " + release.notes()), false);
+                    mc.player.displayClientMessage(Component.literal("§7   " + release.notes()), false);
                 }
                 String url = release.url();
                 if (url != null && (url.startsWith("https://") || url.startsWith("http://"))) {
-                    mc.player.displayClientMessage(Component.literal("§7다운로드: ")
-                            .append(Component.literal("§b§n여기를 클릭")
+                    mc.player.displayClientMessage(Component.literal("")
+                            .append(Component.literal("§b§n ▶ 다운로드 (여기 클릭)")
                                     .withStyle(st -> st
                                             .withClickEvent(new net.minecraft.network.chat.ClickEvent(
                                                     net.minecraft.network.chat.ClickEvent.Action.OPEN_URL, url))
                                             .withHoverEvent(new net.minecraft.network.chat.HoverEvent(
-                                                    net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT, Component.literal(url))))),
+                                                    net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
+                                                    Component.literal("§7" + url)))))
+                            .append(Component.literal("§r§8   · 기존 파일 삭제 후 교체")),
                             false);
                 }
+                mc.player.displayClientMessage(Component.literal("§6§m                                              "), false);
             });
         });
     }

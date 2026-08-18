@@ -158,22 +158,26 @@ public final class DtLedgerClient implements ClientModInitializer {
 
         UpdateChecker.checkAsync(config.updateCheckUrl, current, release -> client.execute(() -> {
             if (client.player == null) return;
-            client.player.sendMessage(Text.literal("§6[빌띵] §f새 버전 §e" + release.version()
-                    + "§f 이 나왔습니다. §7(현재 " + current + ")"), false);
+            client.player.sendMessage(Text.literal("§6§m                                              "), false);
+            client.player.sendMessage(Text.literal("§6 ✦ §l빌띵§r§f  새 버전 §a§l" + release.version()
+                    + "§r §7(현재 " + current + ")"), false);
             if (release.notes() != null && !release.notes().isBlank()) {
-                client.player.sendMessage(Text.literal("§8· " + release.notes()), false);
+                client.player.sendMessage(Text.literal("§7   " + release.notes()), false);
             }
             String url = release.url();
             if (url != null && (url.startsWith("https://") || url.startsWith("http://"))) {
-                client.player.sendMessage(Text.literal("§7다운로드: ")
-                        .append(Text.literal("§b§n여기를 클릭")
+                client.player.sendMessage(Text.literal("")
+                        .append(Text.literal("§b§n ▶ 다운로드 (여기 클릭)")
                                 .styled(st -> st
                                         .withClickEvent(new net.minecraft.text.ClickEvent(
                                                 net.minecraft.text.ClickEvent.Action.OPEN_URL, url))
                                         .withHoverEvent(new net.minecraft.text.HoverEvent(
-                                                net.minecraft.text.HoverEvent.Action.SHOW_TEXT, Text.literal(url))))),
+                                                net.minecraft.text.HoverEvent.Action.SHOW_TEXT,
+                                                Text.literal("§7" + url)))))
+                        .append(Text.literal("§r§8   · 기존 파일 삭제 후 교체")),
                         false);
             }
+            client.player.sendMessage(Text.literal("§6§m                                              "), false);
         }));
     }
 
