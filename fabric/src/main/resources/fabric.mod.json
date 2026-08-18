@@ -11,6 +11,7 @@
     "sources": "https://ddingtycoon.kr"
   },
   "license": "MIT",
+  "icon": "assets/billding/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": [
