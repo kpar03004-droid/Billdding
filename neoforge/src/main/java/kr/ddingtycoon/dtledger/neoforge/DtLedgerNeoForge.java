@@ -171,7 +171,7 @@ public final class DtLedgerNeoForge {
             mc.execute(() -> {
                 if (mc.player == null) return;
                 mc.player.displayClientMessage(Component.literal("§6§m                                              "), false);
-                mc.player.displayClientMessage(Component.literal("§6 ✦ §l빌띵§r§f  새 버전 §a§l" + release.version()
+                mc.player.displayClientMessage(Component.literal("§6§l 빌띵§r§f  새 버전 §a§l" + release.version()
                         + "§r §7(현재 " + current + ")"), false);
                 if (release.notes() != null && !release.notes().isBlank()) {
                     mc.player.displayClientMessage(Component.literal("§7   " + release.notes()), false);
@@ -179,7 +179,7 @@ public final class DtLedgerNeoForge {
                 String url = release.url();
                 if (url != null && (url.startsWith("https://") || url.startsWith("http://"))) {
                     mc.player.displayClientMessage(Component.literal("")
-                            .append(Component.literal("§b§n ▶ 다운로드 (여기 클릭)")
+                            .append(Component.literal("§b§n » 다운로드 (여기 클릭)")
                                     .withStyle(st -> st
                                             .withClickEvent(new net.minecraft.network.chat.ClickEvent(
                                                     net.minecraft.network.chat.ClickEvent.Action.OPEN_URL, url))
@@ -189,7 +189,6 @@ public final class DtLedgerNeoForge {
                             .append(Component.literal("§r§8   · 기존 파일 삭제 후 교체")),
                             false);
                 }
-                mc.player.displayClientMessage(Component.literal("§6§m                                              "), false);
             });
         });
     }
