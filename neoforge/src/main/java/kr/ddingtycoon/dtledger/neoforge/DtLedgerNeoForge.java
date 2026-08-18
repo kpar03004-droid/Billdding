@@ -46,6 +46,7 @@ public final class DtLedgerNeoForge {
     /** GUI lore 스캔 주기(틱). Fabric 판과 동일 — 3틱(약 150ms)마다. */
     private static final int GUI_SCAN_INTERVAL = 3;
     private int guiScanTick = 0;
+    private int updateTick = 0;
 
     public DtLedgerNeoForge(IEventBus modBus) {
         Path dir = FMLPaths.CONFIGDIR.get().resolve("billding");
@@ -115,6 +116,9 @@ public final class DtLedgerNeoForge {
             store.tick(now);
             keys.tick(mc);
             if (probe != null) probe.tick(mc);
+
+            // 새 버전 재확인 — 실제 요청은 UpdateChecker 가 1시간 간격으로만. 60초마다 두드린다.
+            if (++updateTick % 1200 == 0) checkForUpdate(config);
         });
 
         NeoForge.EVENT_BUS.addListener((ClientChatReceivedEvent.System e) -> {

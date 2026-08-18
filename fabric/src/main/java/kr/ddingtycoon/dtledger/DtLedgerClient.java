@@ -105,6 +105,7 @@ public final class DtLedgerClient implements ClientModInitializer {
 
         // 메인 틱 펌프: 강화창 상태 갱신 → 잔고 감지 → 결합 확정 → 저장 flush
         final int[] guiScanTick = {0};
+        final int[] updateTick = {0};
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             long now = System.currentTimeMillis();
 
@@ -127,6 +128,10 @@ public final class DtLedgerClient implements ClientModInitializer {
             balanceWatcher.tick(client, now);   // 시간 기반 — 매 틱 유지
             resolver.tick(now);
             store.tick(now);
+
+            // 새 버전 재확인 — 실제 네트워크 요청은 UpdateChecker 가 1시간 간격으로만 낸다.
+            // 여기선 60초마다 두드려서, 구버전을 계속 쓰면 1시간마다 알림이 다시 뜨게 한다.
+            if (++updateTick[0] % 1200 == 0) checkForUpdate(config, client);
         });
 
         // 접속 시 잔고 기준선 리셋, 종료 시 저장 flush

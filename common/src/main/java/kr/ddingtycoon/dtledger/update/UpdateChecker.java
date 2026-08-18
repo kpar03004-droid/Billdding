@@ -26,8 +26,11 @@ public final class UpdateChecker {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
 
+    /** 재확인 간격 — 구버전을 쓰는 동안 1시간마다 다시 알린다(2026-08-19 사용자 요청). */
+    private static final long RECHECK_INTERVAL_MS = 3_600_000;
+
     private static volatile boolean inFlight;
-    private static volatile boolean done;
+    private static volatile long lastCheckAt;   // 마지막으로 요청을 시작한 시각(0=아직 없음)
     private static volatile Release latest;
 
     private UpdateChecker() {
@@ -39,16 +42,20 @@ public final class UpdateChecker {
     }
 
     /**
-     * 비동기로 1회 확인하고, 현재 버전보다 새 버전이 있을 때만 콜백한다.
-     * 세션당 한 번만 실제 요청이 나간다(재접속마다 두드리지 않음).
+     * 비동기로 확인하고, 현재 버전보다 새 버전이 있을 때만 콜백한다.
+     * 매 틱 호출해도 안전하다 — 내부에서 {@link #RECHECK_INTERVAL_MS}(1시간) 간격으로만
+     * 실제 요청이 나간다. 구버전을 계속 쓰면 1시간마다 다시 알림이 뜬다.
      *
      * @param url            버전 정보 JSON 주소. 비어 있으면 아무것도 안 함.
      * @param currentVersion 현재 모드 버전
      * @param onUpdate       새 버전이 있을 때 호출(클라이언트 스레드 전환은 호출측 책임)
      */
     public static void checkAsync(String url, String currentVersion, Consumer<Release> onUpdate) {
-        if (url == null || url.isBlank() || done || inFlight) return;
+        if (url == null || url.isBlank() || inFlight) return;
         if (!url.startsWith("https://") && !url.startsWith("http://")) return;
+        long now = System.currentTimeMillis();
+        if (lastCheckAt != 0 && now - lastCheckAt < RECHECK_INTERVAL_MS) return;  // 1시간에 한 번만
+        lastCheckAt = now;
         inFlight = true;
 
         HttpClient client = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
@@ -70,14 +77,14 @@ public final class UpdateChecker {
                 })
                 .whenComplete((v, err) -> {   // 실패해도 조용히 — 알림은 부가 기능일 뿐
                     inFlight = false;
-                    done = true;
+                    // lastCheckAt 은 유지 → 다음 요청은 1시간 뒤. 실패해도 매 틱 재시도하지 않는다.
                 });
     }
 
-    /** 테스트·재확인용 초기화. */
+    /** 테스트·재확인용 초기화(다음 호출이 즉시 나가도록 타이머도 리셋). */
     public static void reset() {
         inFlight = false;
-        done = false;
+        lastCheckAt = 0;
         latest = null;
     }
 
