@@ -130,24 +130,25 @@ class SkillUpgradeCostTest {
 
     /**
      * 2026-08-22 제보: "전문가 300만골짜리를 했는데 5백만골 지출되어 있다".
-     * 업그레이드 성공 직후 화면을 계속 보고 있으면(스킬 창이 열린 채) 레벨이 바로 올라가
-     * 다음 단계 가격이 표시된다. 정산은 최대 15초 뒤라, 그사이 재스캔이 맵을 덮어쓰면
-     * 방금 낸 돈이 아니라 다음 단계 가격을 채택하게 된다. 신호 도착 시점 값으로 잠가야 한다.
+     *
+     * <p>실측 타임라인 — <b>누르는 순간</b> 레벨이 올라 창엔 이미 다음 단계 가격이 뜨고,
+     * "업그레이드 성공" 채팅도 거의 <b>동시에</b> 온다. 돈은 그보다 더 뒤에 빠진다.
+     * 즉 채팅이 도착했을 땐 표시가가 이미 오염돼 있어, 그 시점 값을 믿으면 안 된다.
      */
     @Test
-    void 업그레이드_후_다음단계_가격으로_덮어써도_처음_낸_돈을_기록한다() {
+    void 클릭_순간_가격이_바뀌고_채팅이_동시에_와도_실제_낸_돈을_기록한다() {
         DtConfig cfg = new DtConfig();
         List<TransactionRecord> out = new ArrayList<>();
         TransactionResolver r = new TransactionResolver(cfg, new TransferClassifier(cfg), out::add);
 
-        // 업그레이드 전: 창에 300만골(다음 단계 비용)이 떠 있다
+        // 마우스를 올려둔 상태 — 창에 현재 단계 비용 300만골이 떠 있고 스캔이 이를 읽는다
         r.noteSkillCosts(Map.of("조개 쫌 사조개", 3_000_000L));
-        r.onSignal(new TradeSignal(TradeSignal.Type.SKILL_UPGRADE, 0, 0, 0, "조개 쫌 사조개 스킬", "raw", true));
 
-        // 업그레이드 성공 직후: 레벨이 올라 화면엔 이미 500만골(그다음 단계 비용)이 뜬다.
-        // 유저가 스킬 창을 계속 보고 있어(마우스를 대고 있어) 매 스캔마다 이 값이 재확인된다.
+        // 클릭! 레벨이 즉시 올라 창은 다음 단계 500만골로 바뀐다(스캔이 이걸 먼저 잡을 수도 있다)
         r.noteSkillCosts(Map.of("조개 쫌 사조개", 5_000_000L));
-        r.tick(System.currentTimeMillis() + 1_000);   // 재스캔 시뮬레이션(정산 전)
+        // 그와 거의 동시에 성공 채팅 도착 — 이 시점 표시가는 이미 500만골이다
+        r.onSignal(new TradeSignal(TradeSignal.Type.SKILL_UPGRADE, 0, 0, 0, "조개 쫌 사조개 스킬", "raw", true));
+        // 계속 마우스를 대고 있어 같은 값이 반복 스캔된다
         r.noteSkillCosts(Map.of("조개 쫌 사조개", 5_000_000L));
 
         settle(r);
@@ -156,30 +157,56 @@ class SkillUpgradeCostTest {
         assertEquals(3_000_000, out.get(0).amount, "다음 단계 가격이 아니라 실제로 낸 돈이어야 함");
     }
 
-    /**
-     * 창 가격을 신호 도착 시점엔 아직 못 읽었더라도(2026-08-13 원래 취지), 이후 스캔에서
-     * 처음 잡히면 그 값으로 잠기고 더 나중 스캔값(다음 단계 가격일 수 있음)은 무시해야 한다.
-     */
     @Test
-    void 신호_도착_직후_처음_잡힌_가격에_잠기고_그_다음값은_무시한다() {
+    void 연속_업그레이드는_각_단계의_실제_지불액으로_쪼갠다() {
         DtConfig cfg = new DtConfig();
         List<TransactionRecord> out = new ArrayList<>();
         TransactionResolver r = new TransactionResolver(cfg, new TransferClassifier(cfg), out::add);
 
-        // 신호가 먼저 옴 — 아직 창 가격을 모른다(창을 막 연 순간 등)
+        // 100만 → 300만 → 500만 으로 두 번 올린다. 실제 지불액은 100만 + 300만.
+        r.noteSkillCosts(Map.of("조개 쫌 사조개", 1_000_000L));
+        r.noteSkillCosts(Map.of("조개 쫌 사조개", 3_000_000L));
+        r.onSignal(new TradeSignal(TradeSignal.Type.SKILL_UPGRADE, 0, 0, 0, "조개 쫌 사조개 스킬", "raw", true));
+        r.noteSkillCosts(Map.of("조개 쫌 사조개", 5_000_000L));
         r.onSignal(new TradeSignal(TradeSignal.Type.SKILL_UPGRADE, 0, 0, 0, "조개 쫌 사조개 스킬", "raw", true));
 
-        // 잠시 후 첫 스캔이 300만골을 잡음 — 이 값으로 잠겨야 한다
-        r.noteSkillCosts(Map.of("조개 쫌 사조개", 3_000_000L));
-        r.tick(System.currentTimeMillis() + 1_000);
+        settle(r);
 
-        // 그 후 다음 단계 가격(500만골)으로 화면이 바뀌어도 이미 잠긴 값을 유지해야 함
-        r.noteSkillCosts(Map.of("조개 쫌 사조개", 5_000_000L));
+        assertEquals(2, out.size());
+        assertEquals(4_000_000, sum(out), "100만+300만 이어야 함(500만이 섞이면 안 됨)");
+    }
+
+    @Test
+    void 가격이_안_바뀌면_현재_표시가를_쓴다() {
+        // 최고 레벨 등으로 표시가가 그대로인 경우 — 전환 기록이 없으니 현재가로 대체
+        DtConfig cfg = new DtConfig();
+        List<TransactionRecord> out = new ArrayList<>();
+        TransactionResolver r = new TransactionResolver(cfg, new TransferClassifier(cfg), out::add);
+
+        r.noteSkillCosts(Map.of("조개 쫌 사조개", 3_000_000L));
+        r.noteSkillCosts(Map.of("조개 쫌 사조개", 3_000_000L));
+        r.onSignal(new TradeSignal(TradeSignal.Type.SKILL_UPGRADE, 0, 0, 0, "조개 쫌 사조개 스킬", "raw", true));
+
+        settle(r);
+
+        assertEquals(3_000_000, sum(out));
+    }
+
+    @Test
+    void 다른_스킬의_가격_변동에_영향받지_않는다() {
+        DtConfig cfg = new DtConfig();
+        List<TransactionRecord> out = new ArrayList<>();
+        TransactionResolver r = new TransactionResolver(cfg, new TransferClassifier(cfg), out::add);
+
+        r.noteSkillCosts(Map.of("조개 쫌 사조개", 3_000_000L, "심해 채집꾼", 1_000_000L));
+        // 심해 채집꾼만 업그레이드 — 조개 쫌 사조개 가격은 그대로
+        r.noteSkillCosts(Map.of("조개 쫌 사조개", 3_000_000L, "심해 채집꾼", 2_000_000L));
+        r.onSignal(new TradeSignal(TradeSignal.Type.SKILL_UPGRADE, 0, 0, 0, "심해 채집꾼 스킬", "raw", true));
 
         settle(r);
 
         assertEquals(1, out.size());
-        assertEquals(3_000_000, out.get(0).amount, "처음 잠긴 값을 유지해야 함");
+        assertEquals(1_000_000, out.get(0).amount, "심해 채집꾼의 직전가여야 함");
     }
 
     @Test

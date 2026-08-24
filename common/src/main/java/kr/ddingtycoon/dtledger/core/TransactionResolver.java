@@ -54,16 +54,6 @@ public final class TransactionResolver {
         final long ts;
         CrossCheck matched;   // null=아직
         Long matchedDelta;    // 매칭된 ΔG 값(amountFromDelta 금액 산정용)
-        /**
-         * 전문가 스킬 업그레이드 비용 — 한 번 값이 잡히면 그 값으로 잠긴다(SKILL_UPGRADE 전용).
-         * <p>2026-08-22 제보: 업그레이드 성공 직후에도 화면을 계속 보고 있으면(스킬 창이 열린 채)
-         * 매 스캔마다 최신 표시가를 다시 읽어 오는데, 업그레이드 성공 시 레벨이 바로 올라가
-         * 화면엔 이미 <b>다음 단계</b> 가격이 떠 있다. 정산은 최대 15초 뒤에야 실행되므로,
-         * 그때 가서 skillCostFor 를 다시 부르면 방금 낸 돈이 아니라 다음 단계 가격을 채택하게 된다
-         * ("300만골 지불했는데 500만골로 기록"). 신호 도착 시점(또는 그 직후 첫 성공)에 값을
-         * 한 번 잠그면 이후 화면이 어떻게 바뀌든 영향받지 않는다.
-         */
-        Long lockedSkillCost;
         PendingSignal(TradeSignal sig, long ts) { this.sig = sig; this.ts = ts; }
     }
 
@@ -98,6 +88,20 @@ public final class TransactionResolver {
     private final Map<String, long[]> skillCosts = new java.util.HashMap<>();
 
     /**
+     * 스킬 이름 → <b>가격이 바뀌기 직전 값</b>들의 큐 (금액, 바뀐 시각).
+     *
+     * <p><b>왜 필요한가</b> — 업그레이드를 누르는 순간 레벨이 즉시 올라 창엔 이미 <b>다음 단계</b>
+     * 가격이 뜨고, "업그레이드 성공" 채팅도 거의 동시에 온다(2026-08-22 실측). 즉 채팅 도착
+     * 시점의 표시가는 이미 오염돼 있어, 그때 값을 잠가도 다음 단계 가격을 집는다
+     * (300만골 결제가 500만골로 기록된 제보의 원인).
+     *
+     * <p>대신 <b>가격 전환 자체를 업그레이드 신호로</b> 쓴다. A→B 로 바뀌면 그 순간 A 를 큐에
+     * 쌓아두고, 정산 때 꺼내 쓴다. 연속 업그레이드도 순서대로 쌓이므로 FIFO 로 정확히 짝지어진다.
+     * 바다의 가호에서 강화 단계 상승을 감지하는 것과 같은 원리.
+     */
+    private final Map<String, java.util.ArrayDeque<long[]>> skillPriceTransitions = new java.util.HashMap<>();
+
+    /**
      * 로더 화면 감시기가 전문가 스킬 창에서 읽은 (스킬 이름 → 비용)을 알려준다(매 틱).
      *
      * <p>2026-08-13 제보: 창을 열어둔 채 시간이 지나면 골드 표시가 안 갱신돼 ΔG 가 안 오고,
@@ -109,14 +113,25 @@ public final class TransactionResolver {
         long now = System.currentTimeMillis();
         for (Map.Entry<String, Long> e : costs.entrySet()) {
             if (e.getValue() == null || e.getValue() < 0) continue;
+            long[] prev = skillCosts.get(e.getKey());
+            // 가격이 바뀌었다 = 그 스킬을 업그레이드했다. 바뀌기 직전 값이 실제 지불액이다.
+            if (prev != null && prev[0] != e.getValue()) {
+                skillPriceTransitions
+                        .computeIfAbsent(e.getKey(), k -> new java.util.ArrayDeque<>())
+                        .addLast(new long[]{prev[0], now});
+            }
             skillCosts.put(e.getKey(), new long[]{e.getValue(), now});
         }
         skillCosts.entrySet().removeIf(en -> now - en.getValue()[1] > GUI_COST_MEMORY_MS);
+        for (java.util.ArrayDeque<long[]> q : skillPriceTransitions.values()) {
+            q.removeIf(t -> now - t[1] > GUI_COST_MEMORY_MS);
+        }
+        skillPriceTransitions.entrySet().removeIf(en -> en.getValue().isEmpty());
         lastGuiCostInfo = "전문가 스킬 " + skillCosts.size() + "종 비용 확보";
     }
 
-    /** 채팅 라벨("재배학개론 스킬")에 해당하는 창 표시 비용. 없으면 null. */
-    private Long skillCostFor(String label) {
+    /** 채팅 라벨("재배학개론 스킬")에 해당하는 스킬 이름. 없으면 null. */
+    private String skillNameFor(String label) {
         long now = System.currentTimeMillis();
         String best = null;
         for (Map.Entry<String, long[]> e : skillCosts.entrySet()) {
@@ -125,7 +140,32 @@ public final class TransactionResolver {
             // 이름이 겹칠 때(예: "재배학" vs "재배학개론") 더 긴 쪽이 정확하다
             if (best == null || e.getKey().length() > best.length()) best = e.getKey();
         }
-        return best == null ? null : skillCosts.get(best)[0];
+        if (best != null) return best;
+        // 표시가는 만료됐어도 전환 기록만 남아 있을 수 있다(창을 닫은 뒤 정산되는 경우)
+        for (String name : skillPriceTransitions.keySet()) {
+            if (!SkillCostLore.matchesLabel(name, label)) continue;
+            if (best == null || name.length() > best.length()) best = name;
+        }
+        return best;
+    }
+
+    /**
+     * 업그레이드로 실제 지불한 금액을 하나 소비해 돌려준다.
+     *
+     * <p>가격 전환 기록(바뀌기 직전 값)이 있으면 그것을 FIFO 로 꺼낸다 — 이게 실제 낸 돈이다.
+     * 전환이 없으면(가격이 안 바뀌는 최고 레벨 등) 현재 표시가로 대체한다.
+     */
+    private Long consumeSkillCost(String label) {
+        String name = skillNameFor(label);
+        if (name == null) return null;
+        java.util.ArrayDeque<long[]> q = skillPriceTransitions.get(name);
+        if (q != null && !q.isEmpty()) {
+            long[] t = q.pollFirst();
+            if (q.isEmpty()) skillPriceTransitions.remove(name);
+            return t[0];
+        }
+        long[] cur = skillCosts.get(name);
+        return cur == null ? null : cur[0];
     }
 
     public synchronized void noteGuiCost(TradeSignal.Type type, long cost) {
@@ -208,16 +248,7 @@ public final class TransactionResolver {
                 }
             }
         }
-        PendingSignal ps = new PendingSignal(sig, now);
-        tryLockSkillCost(ps); // 채팅 도착 즉시 그 순간의 창 가격을 잠근다(늦게 잠글수록 다음 단계 가격으로 오염될 위험)
-        signals.add(ps);
-    }
-
-    /** SKILL_UPGRADE 신호의 비용을 아직 못 잠갔으면 지금 창 표시가로 잠가본다. 이미 잠겼으면 아무 것도 안 함. */
-    private void tryLockSkillCost(PendingSignal ps) {
-        if (ps.sig.type != TradeSignal.Type.SKILL_UPGRADE || ps.lockedSkillCost != null) return;
-        Long cost = skillCostFor(ps.sig.label);
-        if (cost != null && cost > 0) ps.lockedSkillCost = cost;
+        signals.add(new PendingSignal(sig, now));
     }
 
     public void onDelta(long delta) {
@@ -249,10 +280,6 @@ public final class TransactionResolver {
     /** 만료된 신호/델타를 확정. 클라 틱에서 매번 호출. */
     public void tick(long now) {
         long w = config.matchWindowMs;
-
-        // 0) 신호 도착 시점엔 창 가격을 아직 못 읽었던 SKILL_UPGRADE 신호 — 매 틱 잠금을 재시도.
-        //    한 번 잠기면(lockedSkillCost != null) tryLockSkillCost 가 즉시 반환하므로 이후엔 안 건드림.
-        for (PendingSignal ps : signals) tryLockSkillCost(ps);
 
         // 1) 도착한 델타를 즉시 정확 매칭 시도(부호+금액 일치). 금고 전용·ΔG금액형은 제외.
         for (PendingSignal ps : signals) {
@@ -361,11 +388,11 @@ public final class TransactionResolver {
             if (e.getKey() == TradeSignal.Type.SKILL_UPGRADE) {
                 List<PendingSignal> unresolved = new ArrayList<>();
                 for (PendingSignal ps : group) {
-                    // 여기서 skillCostFor 를 다시 부르지 않는다 — 그 순간 화면엔 이미 다음 단계
-                    // 가격이 떠 있을 수 있어 잘못된 값으로 덮어써진다. 잠긴 값만 신뢰한다.
-                    Long cost = ps.lockedSkillCost;
+                    // 가격이 바뀌기 직전 값(=실제 지불액)을 우선 소비한다. 현재 표시가를 그대로
+                    // 쓰면 업그레이드로 이미 오른 다음 단계 가격을 집는다(2026-08-22 제보).
+                    Long cost = consumeSkillCost(ps.sig.label);
                     if (cost != null && cost > 0) {
-                        emitDeltaRecord(ps, sign, cost, "창 표시 금액(신호 도착 시점 잠금)");
+                        emitDeltaRecord(ps, sign, cost, "창 표시 금액(업그레이드 직전가)");
                     } else {
                         unresolved.add(ps);
                     }
