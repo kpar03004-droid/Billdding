@@ -54,6 +54,16 @@ public final class TransactionResolver {
         final long ts;
         CrossCheck matched;   // null=아직
         Long matchedDelta;    // 매칭된 ΔG 값(amountFromDelta 금액 산정용)
+        /**
+         * 전문가 스킬 업그레이드 비용 — 한 번 값이 잡히면 그 값으로 잠긴다(SKILL_UPGRADE 전용).
+         * <p>2026-08-22 제보: 업그레이드 성공 직후에도 화면을 계속 보고 있으면(스킬 창이 열린 채)
+         * 매 스캔마다 최신 표시가를 다시 읽어 오는데, 업그레이드 성공 시 레벨이 바로 올라가
+         * 화면엔 이미 <b>다음 단계</b> 가격이 떠 있다. 정산은 최대 15초 뒤에야 실행되므로,
+         * 그때 가서 skillCostFor 를 다시 부르면 방금 낸 돈이 아니라 다음 단계 가격을 채택하게 된다
+         * ("300만골 지불했는데 500만골로 기록"). 신호 도착 시점(또는 그 직후 첫 성공)에 값을
+         * 한 번 잠그면 이후 화면이 어떻게 바뀌든 영향받지 않는다.
+         */
+        Long lockedSkillCost;
         PendingSignal(TradeSignal sig, long ts) { this.sig = sig; this.ts = ts; }
     }
 
@@ -198,7 +208,16 @@ public final class TransactionResolver {
                 }
             }
         }
-        signals.add(new PendingSignal(sig, now));
+        PendingSignal ps = new PendingSignal(sig, now);
+        tryLockSkillCost(ps); // 채팅 도착 즉시 그 순간의 창 가격을 잠근다(늦게 잠글수록 다음 단계 가격으로 오염될 위험)
+        signals.add(ps);
+    }
+
+    /** SKILL_UPGRADE 신호의 비용을 아직 못 잠갔으면 지금 창 표시가로 잠가본다. 이미 잠겼으면 아무 것도 안 함. */
+    private void tryLockSkillCost(PendingSignal ps) {
+        if (ps.sig.type != TradeSignal.Type.SKILL_UPGRADE || ps.lockedSkillCost != null) return;
+        Long cost = skillCostFor(ps.sig.label);
+        if (cost != null && cost > 0) ps.lockedSkillCost = cost;
     }
 
     public void onDelta(long delta) {
@@ -230,6 +249,10 @@ public final class TransactionResolver {
     /** 만료된 신호/델타를 확정. 클라 틱에서 매번 호출. */
     public void tick(long now) {
         long w = config.matchWindowMs;
+
+        // 0) 신호 도착 시점엔 창 가격을 아직 못 읽었던 SKILL_UPGRADE 신호 — 매 틱 잠금을 재시도.
+        //    한 번 잠기면(lockedSkillCost != null) tryLockSkillCost 가 즉시 반환하므로 이후엔 안 건드림.
+        for (PendingSignal ps : signals) tryLockSkillCost(ps);
 
         // 1) 도착한 델타를 즉시 정확 매칭 시도(부호+금액 일치). 금고 전용·ΔG금액형은 제외.
         for (PendingSignal ps : signals) {
@@ -338,9 +361,11 @@ public final class TransactionResolver {
             if (e.getKey() == TradeSignal.Type.SKILL_UPGRADE) {
                 List<PendingSignal> unresolved = new ArrayList<>();
                 for (PendingSignal ps : group) {
-                    Long cost = skillCostFor(ps.sig.label);
+                    // 여기서 skillCostFor 를 다시 부르지 않는다 — 그 순간 화면엔 이미 다음 단계
+                    // 가격이 떠 있을 수 있어 잘못된 값으로 덮어써진다. 잠긴 값만 신뢰한다.
+                    Long cost = ps.lockedSkillCost;
                     if (cost != null && cost > 0) {
-                        emitDeltaRecord(ps, sign, cost, "창 표시 금액");
+                        emitDeltaRecord(ps, sign, cost, "창 표시 금액(신호 도착 시점 잠금)");
                     } else {
                         unresolved.add(ps);
                     }
