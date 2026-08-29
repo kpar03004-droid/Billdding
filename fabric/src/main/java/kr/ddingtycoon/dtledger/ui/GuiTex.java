@@ -67,6 +67,7 @@ public final class GuiTex {
             case "공예품"     -> "icon_gongye";
             case "배 낚시"    -> "icon_baenaksi";
             case "낚시대회"    -> "icon_naksidaehoe";
+            case "수족관"     -> "icon_suchokgwan"; // 반려어 방생 대금(물고기+금화)
             case "노크틸라"    -> "icon_noctila";
             case "무역"       -> "icon_muyeok";   // 나무 어선 획득권
             case "유저상점"    -> "icon_usershop";
