@@ -100,6 +100,9 @@ public final class TransferClassifier {
                 out.add(expense(ts, sig.amount, TransactionRecord.CAT_FLEA_ORDER, sig.label, sig.qty, conf, crossed, note));
             case FISH_SYNTH, CONTEST_PRIZE ->
                 out.add(income(ts, sig.amount, "낚시대회", sig.label, sig.qty, conf, crossed, note));
+            // 수족관은 낚시대회와 별개 콘텐츠(어항 모듈에서 키운 반려어) — 카테고리를 분리한다.
+            case AQUARIUM_RELEASE ->
+                out.add(income(ts, sig.amount, "수족관", sig.label, sig.qty, conf, crossed, note));
             case USER_TRANSFER_IN ->
                 out.add(income(ts, sig.amount, "송금", sig.label, 0, conf, crossed, note));
             case MERMAID_RESET ->

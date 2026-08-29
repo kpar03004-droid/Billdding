@@ -168,6 +168,39 @@ class CurrencyParserTest {
     }
 
     @Test
+    void 반려물고기_방생은_수입이고_금액은_메시지에서_읽는다() {
+        // 2026-08-29 실측: "반려 물고기를 방생하여 234,000골드를 받았습니다."
+        TradeSignal s = parser.parse("반려 물고기를 방생하여 234,000골드를 받았습니다.");
+        assertNotNull(s);
+        assertEquals(TradeSignal.Type.AQUARIUM_RELEASE, s.type);
+        assertEquals(234_000, s.amount);
+        assertFalse(s.amountFromDelta, "금액이 본문에 있어 ΔG 불필요");
+        assertEquals(+1, s.expectedSign(), "방생 대금은 수입");
+        assertEquals("반려 물고기 방생", s.label);
+    }
+
+    @Test
+    void 방생_금액은_어종_성장도에_따라_달라도_그대로_읽는다() {
+        // 희귀 55,000 ~ 신화 100,000 기본가에 애정도·전문가 배율이 곱해져 매번 다르다
+        assertEquals(5_500, parser.parse("반려 물고기를 방생하여 5,500골드를 받았습니다.").amount);
+        assertEquals(234_000, parser.parse("반려 물고기를 방생하여 234,000골드를 받았습니다.").amount);
+        assertEquals(150_000, parser.parse("반려 물고기를 방생하여 150000골드를 받았습니다.").amount, "쉼표 없는 표기");
+        assertEquals(234_000, parser.parse("반려 물고기를 방생하여 234,000 골드를 받았습니다.").amount, "숫자-골드 공백");
+        assertEquals(234_000, parser.parse("§a반려 물고기를 방생하여 234,000골드를 받았습니다.").amount, "색코드 접두");
+    }
+
+    @Test
+    void 방생은_송금이나_플리마켓_수령과_섞이지_않는다() {
+        // 셋 다 "받았습니다"로 끝나지만 앞부분이 달라 구분돼야 한다
+        assertEquals(TradeSignal.Type.AQUARIUM_RELEASE,
+                parser.parse("반려 물고기를 방생하여 234,000골드를 받았습니다.").type);
+        assertEquals(TradeSignal.Type.USER_TRANSFER_IN,
+                parser.parse("오리주물러님에게서 100,000골드를 받았습니다.").type);
+        assertEquals(TradeSignal.Type.FLEA_DIRECT_SALE,
+                parser.parse("플리마켓에 64개를 판매하여 45,410골드를 받았습니다.").type);
+    }
+
+    @Test
     void 마을_투자는_지출이고_금액은_메시지에서_읽는다() {
         // 2026-08-02 실측 완료문
         TradeSignal s = parser.parse("50,000골드를 마을에 투자하였습니다.");

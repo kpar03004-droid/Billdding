@@ -54,6 +54,7 @@ public final class TradeSignal {
         USER_TRANSFER_OUT,    // 직거래 송금(지출)
         FISH_SYNTH,           // 낚시대회(파라다이스) 어획물 합성 보상(수입)
         CONTEST_PRIZE,        // 낚시대회 순위 보상(수입) — 우편으로 지급, 순위로 금액 확정
+        AQUARIUM_RELEASE,     // 수족관 반려어 방생 대금(수입) — 채팅에 금액이 그대로 온다
 
         // 금액이 본문에 없어 ΔG 로 금액을 매기는 유형 (라벨만 채팅에서)
         SKILL_UPGRADE,        // 전문가 스킬 업그레이드(지출) — 골드+어빌리티스톤 소모, 메시지에 금액 없음
@@ -108,7 +109,7 @@ public final class TradeSignal {
     public int expectedSign() {
         return switch (type) {
             case SALE, USERSHOP_SALE, BANK_WITHDRAW, FLEA_VAULT_WITHDRAW, USER_TRANSFER_IN, FISH_SYNTH,
-                 QUEST_REWARD, FLEA_DIRECT_SALE, CONTEST_PRIZE -> +1;
+                 QUEST_REWARD, FLEA_DIRECT_SALE, CONTEST_PRIZE, AQUARIUM_RELEASE -> +1;
             case USERSHOP_BUY, NPC_SHOP_BUY, FLEA_BUY, BANK_DEPOSIT, FLEA_VAULT_DEPOSIT, USER_TRANSFER_OUT,
                  SKILL_UPGRADE, WEAPON_ENHANCE, ENGRAVE, TOOL_REPAIR, QUALITY_RESTORE,
                  ENGRAVE_INVESTIGATE, VILLAGE_INVEST,

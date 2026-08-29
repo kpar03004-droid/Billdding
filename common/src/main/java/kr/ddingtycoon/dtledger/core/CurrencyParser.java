@@ -241,6 +241,15 @@ public final class CurrencyParser {
                 (m, raw) -> new TradeSignal(TradeSignal.Type.VILLAGE_INVEST,
                         g(m, 1), 0, 0, "마을 투자", raw));
 
+        // 15) 수족관 반려어 방생(수입) — 2026-08-29 실측:
+        //     "반려 물고기를 방생하여 234,000골드를 받았습니다."
+        //     어항 창의 "방생 대금"과 같은 금액이 채팅에 그대로 오므로 창을 읽을 필요가 없다.
+        //     쉬프트클릭 전체 방생도 마리당 한 줄씩 오는지 미확인 — 합계 한 줄이면 그대로 1건이 된다.
+        //     기존 "받았습니다" 규칙들(송금 6·플리 46/47)은 앞에 닉네임/플리마켓이 붙어 충돌하지 않는다.
+        p.addRule(15, "반려\\s*물고기를\\s*방생하여\\s*([\\d,]+)\\s*골드를\\s*받았습니다",
+                (m, raw) -> new TradeSignal(TradeSignal.Type.AQUARIUM_RELEASE,
+                        g(m, 1), 0, 0, "반려 물고기 방생", raw));
+
         // 1) 은행 입금 (+선택적 수수료) → TRANSFER_OUT(입금액) + EXPENSE/FEE(수수료)
         p.addRule(10, "마을 은행에 ([\\d,]+)\\s*골드를 입금했습니다\\.(?:\\s*\\(수수료:\\s*([\\d,]+)\\s*골드\\))?",
                 (m, raw) -> new TradeSignal(TradeSignal.Type.BANK_DEPOSIT,
