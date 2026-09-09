@@ -85,6 +85,7 @@ public final class GuiTex {
             case "의뢰" -> "icon_uiroe";
             case "인어의 축복" -> "icon_ineo";
             case "플로리스트"  -> "icon_florist";  // 세레니티 꽃 · 향장품
+            case "형광 제련품" -> "icon_hyeonggwang"; // 형광 모루 + 형광 광물
             case "마을 투자"   -> "icon_tuja";     // 회수 불가 지출(은행과 구분)
             default -> category.contains("플리마켓") ? "icon_flea" : "icon_coin";
         };
