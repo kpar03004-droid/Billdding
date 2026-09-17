@@ -46,6 +46,7 @@ public final class DtLedgerClient implements ClientModInitializer {
         java.nio.file.Path dir = net.fabricmc.loader.api.FabricLoader.getInstance()
                 .getConfigDir().resolve("billding");
         DtConfig config = DtConfig.load(dir);
+        bindUpdater();
         LedgerStore store = new LedgerStore(dir);
         DailyAggregator aggregator = new DailyAggregator(config, store);
         aggregator.ensureMonthLoaded(YearMonth.now()); // 당월 원장 복구
@@ -149,6 +150,44 @@ public final class DtLedgerClient implements ClientModInitializer {
      * 새 버전이 있으면 채팅에 한 줄 안내. 구버전으로 이미 고친 버그를 제보하는 일이 반복돼 추가.
      * 게임 서버와 무관한 GET 한 번이며 어떤 식별 정보도 보내지 않는다(설정에서 끌 수 있음).
      */
+    /**
+     * 동의 기반 자동 설치기를 연결한다. 여기서는 <b>아무것도 받지 않는다</b> —
+     * 실제 다운로드는 유저가 확인 화면에서 승인해야만 일어난다.
+     *
+     * <p>실패해도 조용히 넘어간다(개발 환경엔 신원 파일이 없고, mods 폴더가 아닌 데서
+     * 로드될 수도 있다). 그 경우 기존의 "링크 눌러 직접 받기" 안내만 뜬다.
+     */
+    private void bindUpdater() {
+        try {
+            var loader = net.fabricmc.loader.api.FabricLoader.getInstance();
+            var mod = loader.getModContainer("billding")
+                    .orElseThrow(() -> new java.io.IOException("모드 메타데이터를 찾을 수 없습니다"));
+            // 칼띵과 같은 기준: 실제 로드된 경로가 '.jar 파일 하나'일 때만 자동 교체를 지원한다.
+            //   (개발 환경은 클래스 폴더라 여기서 걸러진다)
+            var jars = mod.getOrigin().getPaths().stream()
+                    .filter(java.nio.file.Files::isRegularFile)
+                    .filter(p -> p.getFileName() != null && p.getFileName().toString().endsWith(".jar"))
+                    .toList();
+            if (jars.size() != 1) throw new java.io.IOException("실행 JAR 경로가 하나가 아니어서 자동 교체를 지원하지 않습니다");
+            java.nio.file.Path mods = loader.getGameDir().resolve("mods").toAbsolutePath().normalize();
+            if (!jars.get(0).toAbsolutePath().normalize().getParent().equals(mods))
+                throw new java.io.IOException("mods 폴더에 직접 설치된 JAR가 아닙니다");
+            kr.ddingtycoon.dtledger.update.UpdateInstaller.bind(
+                    new kr.ddingtycoon.dtledger.update.ModUpdater(
+                            "billding", mods, jars.get(0),
+                            msg -> {
+                                MinecraftClient mc = MinecraftClient.getInstance();
+                                mc.execute(() -> {
+                                    if (mc.player != null) mc.player.sendMessage(Text.literal("§6[빌띵] §r" + msg), false);
+                                });
+                            }));
+        } catch (Exception e) {
+            // 자동 설치 미지원 환경 — 알림은 수동 안내로만 뜨고, 업데이트 화면은 이 사유를 보여준다.
+            kr.ddingtycoon.dtledger.update.UpdateInstaller.unavailable(
+                    "현재 실행 파일을 확인할 수 없어 자동 업데이트할 수 없습니다: " + e.getMessage());
+        }
+    }
+
     private void checkForUpdate(kr.ddingtycoon.dtledger.config.DtConfig config, MinecraftClient client) {
         if (!config.updateCheckEnabled) return;
         String current = net.fabricmc.loader.api.FabricLoader.getInstance()
@@ -158,6 +197,10 @@ public final class DtLedgerClient implements ClientModInitializer {
 
         UpdateChecker.checkAsync(config.updateCheckUrl, current, release -> client.execute(() -> {
             if (client.player == null) return;
+            // 새 버전 알림이 떴을 때 릴리즈 정보를 미리 받아둔다 — 업데이트 화면을 열면 바로 보이게.
+            //   ModUpdater 에 1시간 쿨다운이 내장돼 있어 GitHub 비인증 한도(시간당 60회)는 걱정 없다.
+            var updater = kr.ddingtycoon.dtledger.update.UpdateInstaller.get();
+            if (updater != null) updater.check();
             client.player.sendMessage(Text.literal("§6§m                                              "), false);
             client.player.sendMessage(Text.literal("§6§l 빌띵§r§f  새 버전 §a§l" + release.version()
                     + "§r §7(현재 " + current + ")"), false);
@@ -175,6 +218,20 @@ public final class DtLedgerClient implements ClientModInitializer {
                                                 net.minecraft.text.HoverEvent.Action.SHOW_TEXT,
                                                 Text.literal("§7" + url)))))
                         .append(Text.literal("§r§8   · 기존 파일 삭제 후 교체")),
+                        false);
+            }
+            // 자동 설치가 가능한 환경이면 한 줄 더. 클릭은 '확인 화면'을 열 뿐,
+            // 바로 받지 않는다 — 다운로드는 그 화면에서 동의해야 시작된다.
+            if (kr.ddingtycoon.dtledger.update.UpdateInstaller.available()) {
+                client.player.sendMessage(Text.literal("")
+                        .append(Text.literal("§a§n » 모드가 대신 설치 (여기 클릭)")
+                                .styled(st -> st
+                                        .withClickEvent(new net.minecraft.text.ClickEvent(
+                                                net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/빌띵 업데이트"))
+                                        .withHoverEvent(new net.minecraft.text.HoverEvent(
+                                                net.minecraft.text.HoverEvent.Action.SHOW_TEXT,
+                                                Text.literal("§7확인 화면을 엽니다. 바로 받지 않습니다.")))))
+                        .append(Text.literal("§r§8   · 동의 후 진행")),
                         false);
             }
         }));

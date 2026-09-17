@@ -24,6 +24,35 @@ repositories {
 // 공유 코어(common)를 이 로더의 소스로 포함 — MC 의존성 0 이므로 안전
 sourceSets.main.java.srcDir rootProject.file('common/src/main/java')
 
+// 업데이터 신원 파일 — ModUpdater 가 JAR 안에서 읽어 자기 버전·저장소·파일명 규칙을 안다.
+//   ⚠️ repository 는 릴리즈가 올라가는 '다운로드 허브' Billding (d 한 개).
+//      소스 저장소 Billdding (d 두 개) 이 아니다.
+//   ⚠️ prefix + 버전 + ".jar" 가 릴리즈 asset 이름과 정확히 일치해야 한다
+//      (예: billding-fabric- + 0.2.6 + .jar). archivesName 과 같은 값을 쓴다.
+sourceSets.main.resources.srcDir layout.buildDirectory.dir('generated/updaterResources')
+tasks.register('generateUpdaterIdentity') {
+    outputs.upToDateWhen { false }
+    doLast {
+        // prefix 가 실제 산출물 이름과 어긋나면 릴리즈를 내도 업데이트가 '조용히' 안 잡힌다.
+        //   (asset 이름 정확 일치로 찾기 때문) 빌드 때 바로 터지게 막아둔다.
+        def expected = base.archivesName.get() + '-'
+        if (expected != 'billding-fabric-') {
+            throw new GradleException("업데이터 prefix 불일치: archivesName=${base.archivesName.get()} " +
+                    "→ prefix 를 '${expected}' 로 맞추세요")
+        }
+        def dest = layout.buildDirectory
+                .file('generated/updaterResources/META-INF/billding-update.properties').get().asFile
+        dest.parentFile.mkdirs()
+        dest.text = "modId=billding\n" +
+                "loader=fabric\n" +
+                "minecraft=${rootProject.minecraft_version}\n" +
+                "version=${rootProject.mod_version}\n" +
+                "repository=kpar03004-droid/Billding\n" +
+                "prefix=billding-fabric-\n"
+    }
+}
+tasks.named('processResources') { dependsOn 'generateUpdaterIdentity' }
+
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"

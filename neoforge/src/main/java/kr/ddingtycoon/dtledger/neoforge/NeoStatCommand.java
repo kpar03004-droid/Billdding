@@ -83,7 +83,23 @@ public final class NeoStatCommand {
                     .executes(ctx -> addManual(ctx.getSource(), TransactionRecord.Kind.EXPENSE,
                             StringArgumentType.getString(ctx, "args")))));
         });
+        both(root, "업데이트", "update", b -> b.executes(ctx -> openUpdateScreen()));
         return root;
+    }
+
+    /**
+     * /빌띵 업데이트 — 업데이트 동의 화면. 다운로드는 화면의 "동의 후 다운로드" 버튼에서만 시작된다.
+     * 자동 설치를 못 쓰는 환경이어도 화면은 열고, 상태 줄에 사유를 보여준다.
+     */
+    private int openUpdateScreen() {
+        Minecraft mc = Minecraft.getInstance();
+        String current = net.neoforged.fml.ModList.get().getModContainerById("billding")
+                .map(m -> m.getModInfo().getVersion().toString())
+                .orElse("0");
+        mc.execute(() -> mc.setScreen(new NeoModUpdateScreen(
+                kr.ddingtycoon.dtledger.update.UpdateInstaller.get(), current,
+                kr.ddingtycoon.dtledger.update.UpdateInstaller.unavailableReason())));
+        return 1;
     }
 
     /** 한글 이름과 영문 이름을 같은 내용으로 나란히 등록한다. */
