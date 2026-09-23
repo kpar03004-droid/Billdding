@@ -52,6 +52,7 @@ public final class TransactionResolver {
     private static final class PendingSignal {
         final TradeSignal sig;
         final long ts;
+        Long guiCostAtSignal; // 강화/각인 채팅이 온 순간 화면에 보이던 비용
         CrossCheck matched;   // null=아직
         Long matchedDelta;    // 매칭된 ΔG 값(amountFromDelta 금액 산정용)
         PendingSignal(TradeSignal sig, long ts) { this.sig = sig; this.ts = ts; }
@@ -76,6 +77,22 @@ public final class TransactionResolver {
     /** 창에서 읽어둔 유형별 비용 후보 (비용 → 마지막으로 본 시각). 합산 분해에 사용. */
     private final Map<TradeSignal.Type, Map<Long, Long>> guiCosts = new java.util.HashMap<>();
     private static final long GUI_COST_MEMORY_MS = 120_000;
+
+    /** 강화/각인의 현재 표시가 (금액, 마지막 관측 시각). 채팅 순간 가격을 잠그는 데 사용. */
+    private final Map<TradeSignal.Type, long[]> currentGuiCosts = new java.util.HashMap<>();
+
+    /**
+     * 강화/각인 표시가가 A→B 로 바뀌었을 때 A 를 보관한다 (금액, 전환 시각).
+     * 성공 직후 GUI가 다음 단계 가격으로 먼저 갱신되어도 실제 결제액 A 를 복원하기 위함.
+     */
+    private final Map<TradeSignal.Type, java.util.ArrayDeque<long[]>> guiCostTransitions =
+            new java.util.HashMap<>();
+
+    /** 채팅 순간 표시가로 인정할 최대 관측 간격. GUI 스캔은 약 100ms 주기라 2초면 충분하다. */
+    private static final long GUI_COST_SIGNAL_FRESH_MS = 2_000;
+
+    /** 성공 채팅과 가격 전환을 같은 시도로 묶는 최대 시간차. */
+    private static final long GUI_COST_TRANSITION_MATCH_MS = 2_000;
 
     /**
      * 로더가 수리 창에서 읽은 비용을 알려준다(매 틱).
@@ -170,6 +187,26 @@ public final class TransactionResolver {
 
     public synchronized void noteGuiCost(TradeSignal.Type type, long cost) {
         long now = System.currentTimeMillis();
+        if (cost < 0) return;
+
+        // 강화/각인은 정산(최대 15초) 때의 최신 가격을 쓰면 안 된다.
+        // 5백만 결제 직후 창이 1천만(다음 단계)으로 바뀌면 예전 로직은 1천만을 기록했다.
+        // 현재가와 A→B 전환의 A를 따로 보관해 채팅 시점 가격을 복원한다.
+        if (GUI_COST_PREFERRED_TYPES.contains(type)) {
+            long[] prev = currentGuiCosts.get(type);
+            if (prev != null && prev[0] != cost) {
+                guiCostTransitions
+                        .computeIfAbsent(type, k -> new java.util.ArrayDeque<>())
+                        .addLast(new long[]{prev[0], now});
+            }
+            currentGuiCosts.put(type, new long[]{cost, now});
+            currentGuiCosts.entrySet().removeIf(en -> now - en.getValue()[1] > GUI_COST_MEMORY_MS);
+            for (java.util.ArrayDeque<long[]> q : guiCostTransitions.values()) {
+                q.removeIf(t -> now - t[1] > GUI_COST_MEMORY_MS);
+            }
+            guiCostTransitions.entrySet().removeIf(en -> en.getValue().isEmpty());
+        }
+
         if (cost == 0) {
             // 무료 수리(2026-08-08 제보: "수리 소모 골드 : 0골드"). 창을 못 읽은 것과는 다르다 —
             // 이때 직전 수리 비용을 재사용하면 없는 지출이 생긴다.
@@ -177,7 +214,6 @@ public final class TransactionResolver {
             lastGuiCostInfo = type + " 0골드(무료)";
             return;
         }
-        if (cost < 0) return;
         zeroCostSeenAt.remove(type);
         Map<Long, Long> m = guiCosts.computeIfAbsent(type, k -> new java.util.HashMap<>());
         m.put(cost, now);
@@ -248,7 +284,11 @@ public final class TransactionResolver {
                 }
             }
         }
-        signals.add(new PendingSignal(sig, now));
+        PendingSignal pending = new PendingSignal(sig, now);
+        if (GUI_COST_PREFERRED_TYPES.contains(sig.type)) {
+            pending.guiCostAtSignal = currentGuiCostAtSignal(sig.type, now);
+        }
+        signals.add(pending);
     }
 
     public void onDelta(long delta) {
@@ -367,16 +407,18 @@ public final class TransactionResolver {
                 continue;
             }
 
-            // 창 금액 우선 유형(강화) — 창에서 비용을 읽었으면 ΔG 가 뭐라 하든 그 금액을 쓴다.
-            // 못 읽었으면 아래 기존 ΔG 경로로 그대로 내려간다.
+            // 창 금액 우선 유형(강화/각인).
+            // 정산 시점의 "최신 가격"이 아니라 각 채팅이 발생한 순간 가격을 쓴다.
+            // 성공으로 A→B 가격 전환이 잡혔으면 A(실제 결제액)를 우선하고,
+            // 실패처럼 가격이 안 바뀌면 채팅 순간에 잠가둔 표시가를 쓴다.
             if (GUI_COST_PREFERRED_TYPES.contains(e.getKey())) {
-                long[] byGui = recentCosts(e.getKey(), group.size());
+                long[] byGui = preferredGuiCosts(e.getKey(), group);
                 if (byGui != null) {
                     for (int i = 0; i < group.size(); i++) {
-                        emitDeltaRecord(group.get(i), sign, byGui[i], "창 표시 금액");
+                        emitDeltaRecord(group.get(i), sign, byGui[i], "거래 시점 창 표시 금액");
                     }
                     takeAllDeltas(sign); // 잘못된 ΔG 가 다른 신호로 새지 않게 함께 소비
-                    lastSettleInfo = e.getKey() + " " + group.size() + "건 — 창 표시 금액으로 기록";
+                    lastSettleInfo = e.getKey() + " " + group.size() + "건 — 거래 시점 창 표시 금액으로 기록";
                     signals.removeAll(group);
                     continue;
                 }
@@ -466,6 +508,73 @@ public final class TransactionResolver {
      */
     private static final java.util.EnumSet<TradeSignal.Type> GUI_COST_PREFERRED_TYPES =
             java.util.EnumSet.of(TradeSignal.Type.WEAPON_ENHANCE, TradeSignal.Type.ENGRAVE);
+
+    /** 강화/각인 채팅이 들어온 순간의 화면 표시가. 오래된 다른 창 가격은 사용하지 않는다. */
+    private Long currentGuiCostAtSignal(TradeSignal.Type type, long now) {
+        long[] cur = currentGuiCosts.get(type);
+        if (cur == null || now - cur[1] > GUI_COST_SIGNAL_FRESH_MS) return null;
+        return cur[0];
+    }
+
+    /**
+     * 강화/각인 신호별 실제 결제액을 복원한다.
+     *
+     * 성공은 GUI가 다음 단계 가격으로 바뀔 수 있으므로 신호 근처의 A→B 전환에서 A를 우선한다.
+     * 실패는 단계가 그대로이므로 채팅 순간 잠가둔 표시가가 가장 안전하다. 잠금값을 못 얻은 경우에만
+     * 근처 전환의 직전가를 보조 근거로 쓴다. 전환 하나를 여러 신호가 공유하지 않도록 그룹 안에서만
+     * 1회씩 매칭한다.
+     */
+    private long[] preferredGuiCosts(TradeSignal.Type type, List<PendingSignal> group) {
+        if (group == null || group.isEmpty()) return null;
+
+        List<long[]> transitions = new ArrayList<>();
+        java.util.ArrayDeque<long[]> q = guiCostTransitions.get(type);
+        if (q != null) transitions.addAll(q);
+        boolean[] used = new boolean[transitions.size()];
+
+        long[] out = new long[group.size()];
+        for (int i = 0; i < group.size(); i++) {
+            PendingSignal ps = group.get(i);
+            Long cost = null;
+
+            if (ps.sig.label != null && ps.sig.label.contains("성공")) {
+                cost = closestTransitionCost(ps.ts, transitions, used);
+            }
+            if (cost == null) cost = ps.guiCostAtSignal;
+            if (cost == null) cost = closestTransitionCost(ps.ts, transitions, used);
+
+            if (cost == null || cost <= 0) return null;
+            out[i] = cost;
+        }
+        // 호출부는 null 이 아니면 반드시 기록하므로, 쓴 전환은 여기서 큐에서 뺀다.
+        // 남겨두면 다음 정산 묶음이 이미 결제 처리된 직전가를 또 집을 수 있다.
+        if (q != null) {
+            for (int j = 0; j < transitions.size(); j++) {
+                if (used[j]) q.remove(transitions.get(j));
+            }
+            if (q.isEmpty()) guiCostTransitions.remove(type);
+        }
+        return out;
+    }
+
+    /**
+     * 시간 창 안의 <b>가장 먼저 생긴</b> 미사용 전환의 직전가를 1회만 사용한다.
+     *
+     * <p>"가장 가까운" 전환을 고르면 안 된다 — 연속 강화는 클릭·가격 전환·채팅이 몇 ms 안에 몰려서
+     * 거리가 사실상 같아지고, 첫 성공이 두 번째 전환(다음 단계 가격)을 가져가 500만이 1000만으로
+     * 찍힌다(테스트가 실행 속도에 따라 간헐 실패하던 원인). 신호는 도착 순서대로, 전환도 발생 순서대로
+     * 쌓이므로 앞에서부터 짝지으면 순서가 보존된다(전문가 스킬 전환 큐와 같은 방식).
+     */
+    private Long closestTransitionCost(long signalTs, List<long[]> transitions, boolean[] used) {
+        for (int i = 0; i < transitions.size(); i++) {
+            if (used[i]) continue;
+            long[] t = transitions.get(i);
+            if (Math.abs(t[1] - signalTs) > GUI_COST_TRANSITION_MATCH_MS) continue;
+            used[i] = true;
+            return t[0];
+        }
+        return null;
+    }
 
     /**
      * 창에서 읽어둔 비용들로 합산 금액을 n건으로 정확히 분해한다.

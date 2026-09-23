@@ -64,6 +64,19 @@ public final class SaleCategory {
     private static final String[] FLUORESCENT = {
             "형광", "오르딘", "루미트", "크레온", "벨릭", "세르칸"
     };
+    /**
+     * 영혼 명품(2026-09-23 가죽 공예 Beta) — 혼이 깃든 가죽으로 만든 명품 5종. NPC 픽스에게 판매.
+     * 사냥 전문가 콘텐츠지만 전리품 판매와 섞이지 않게 카테고리를 나눈다(형광 제련품과 같은 판단).
+     *
+     * <p>게임 내 이름(2026-09-24 확인): 고독한 가죽 키링 · 신비한 가죽 팔찌 · 활기찬 가죽 장갑
+     * · 특이한 가죽 파우치 · 화끈한 가죽 핸드백. (위키의 "활기찬 가죽 지갑"은 오기)
+     * 전부 <b>영혼 형용사 + "가죽" + 제품</b> 꼴이라 "형용사 + 가죽" 5개로 걸린다.
+     * 재료 "고독한 <b>영혼</b> 가죽"은 "고독한 가죽"을 포함하지 않으므로 여기 안 걸린다.
+     * ⚠️ HUNT 의 "가죽"보다 반드시 먼저 검사해야 한다.
+     */
+    private static final String[] SOUL_GOODS = {
+            "고독한 가죽", "신비한 가죽", "활기찬 가죽", "특이한 가죽", "화끈한 가죽"
+    };
     // 세공 — 귀중품(로니 판매). 명품 이름(키론 오르골 등)이 보석명을 포함하므로 채광보다 먼저 검사.
     private static final String[] JEWELRY = {
             "귀중품", "오르골", "축음기", "만년필", "만화경", "라이터", "이어커프",
@@ -173,7 +186,7 @@ public final class SaleCategory {
      *
      * @param label   파싱된 품목명(등급 태그 제거됨)
      * @param context 원문(등급 태그 "[N성 연금품]"/"[공예품]" 등 포함 — 보조 신호)
-     * @return 무역|공예품|플로리스트|형광 제련품|연금|바리스타|낚시대회|배 낚시|세공|채광전문가|노크틸라|공룡
+     * @return 무역|공예품|플로리스트|형광 제련품|영혼 명품|연금|바리스타|낚시대회|배 낚시|세공|채광전문가|노크틸라|공룡
      *         |사냥전문가|요리|해양전문가|재배전문가|판매(미매칭)
      */
     public static String of(String label, String context) {
@@ -191,6 +204,8 @@ public final class SaleCategory {
         // 형광 제련품 — 채광(광석/주괴)·해양(★ 흡수)보다 먼저. 등급 태그가 붙어도
         //   광물 고유명사 5개로 확정되므로 앞에서 잘라낸다.
         if (matchesAny(s, FLUORESCENT)) return "형광 제련품";
+        // 영혼 명품 — 사냥전문가("가죽")보다 먼저.
+        if (matchesAny(s, SOUL_GOODS)) return "영혼 명품";
         // 연금 — 해양/사냥/채광보다 먼저(★·깃털·어패 키워드 충돌 회피)
         if (matchesAny(s, ALCHEMY)) return "연금";
         if (matchesAny(s, BARISTA)) return "바리스타";
