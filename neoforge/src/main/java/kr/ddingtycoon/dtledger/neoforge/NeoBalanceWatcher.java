@@ -83,6 +83,11 @@ public final class NeoBalanceWatcher {
         this.extractor.unlock();   // 서버가 바뀌면 골드 표시 모양도 달라질 수 있다
     }
 
+    /** 확정된 현재 잔고. 아직 못 읽었거나 월드 이동 직후 정착 중이면 null. */
+    public Long confirmedBalance() {
+        return settleTicks > 0 ? null : lastBalance;
+    }
+
     public void tick(Minecraft mc, long now) {
         if (mc.player == null || mc.level == null) return;
         bossBarLines.values().removeIf(t -> now - t > BOSSBAR_TTL_MS);

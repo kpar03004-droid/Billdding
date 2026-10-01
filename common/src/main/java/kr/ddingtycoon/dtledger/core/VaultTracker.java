@@ -56,6 +56,9 @@ public final class VaultTracker {
         return wasSet ? balance() - prev : 0;
     }
 
+    /** 금고 보정 레코드 표식 — 잔고 대조(WalletCheck)가 "지갑과 무관"으로 거르는 근거. */
+    public static final String NOTE_VAULT_SYNC = "금고 실측 잔액과의 차액 자동 보정";
+
     /** 금고 재동기화 차액에 대한 보정 레코드. 금고 잔액에 다시 반영되지 않는 카테고리를 쓴다. */
     public static TransactionRecord missedRecord(long diff, long ts) {
         boolean income = diff > 0;
@@ -65,7 +68,7 @@ public final class VaultTracker {
                 "플리마켓", // CAT_FLEA_SALE/ORDER 를 쓰면 onRecord 가 금고에 또 반영해 이중계상됨
                 income ? "잠수 중 판매(금고 보정)" : "잠수 중 매수 체결(금고 보정)",
                 0, true, TransactionRecord.Confidence.MEDIUM, false,
-                "금고 실측 잔액과의 차액 자동 보정");
+                NOTE_VAULT_SYNC);
     }
 
     /** 확정 레코드 반영. 금고와 무관한 레코드는 무시. */

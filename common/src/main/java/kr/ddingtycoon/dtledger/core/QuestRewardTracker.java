@@ -51,8 +51,28 @@ public final class QuestRewardTracker {
      */
     public static final String CLAIMED_MARKER = "이미 완료한 의뢰";
 
-    /** 창에서 읽은 의뢰 한 건. claimed=보상 수령 완료 상태. */
-    public record Entry(String quest, long reward, boolean claimed) {}
+    /**
+     * 창에서 읽은 의뢰 한 건. claimed=보상 수령 완료 상태.
+     * complete=진행도를 다 채웠는가("- 의뢰 진행도 : 30 / 30"). 진행도 줄을 못 읽었으면 true(판단 보류).
+     */
+    public record Entry(String quest, long reward, boolean claimed, boolean complete) {
+        public Entry(String quest, long reward, boolean claimed) { this(quest, reward, claimed, true); }
+    }
+
+    private static final Pattern PROGRESS_LINE =
+            Pattern.compile("진행도\\s*[:：]\\s*([\\d,]+)\\s*/\\s*([\\d,]+)");
+
+    /**
+     * lore 한 줄의 진행도. "- 의뢰 진행도 : 12 / 30" → 완료 여부(12≥30? false).
+     * 진행도 줄이 아니면 null.
+     */
+    public static Boolean parseProgressDone(String loreLine) {
+        if (loreLine == null) return null;
+        Matcher m = PROGRESS_LINE.matcher(loreLine);
+        if (!m.find()) return null;
+        long done = parseNumber(m.group(1)), goal = parseNumber(m.group(2));
+        return goal > 0 && done >= goal;
+    }
 
     /** lore 한 줄이 수령 완료 표시인가. */
     public static boolean isClaimedLine(String loreLine) {
@@ -101,8 +121,16 @@ public final class QuestRewardTracker {
     private final Map<Long, Seen> recentRewards = new HashMap<>();
     /** 의뢰명 → 직전에 본 수령 여부. 전환(미수령→수령)을 잡기 위한 상태 기억. */
     private final Map<String, Boolean> claimedState = new HashMap<>();
-    /** 수령 감지로 이미 기록한 (보상액 → 시각) — 뒤따라오는 ΔG 를 삼켜 이중계상을 막는다. */
-    private final Map<Long, Long> justRecorded = new HashMap<>();
+    /**
+     * 수령 감지로 이미 기록한 보상들 {금액, 시각} — 뒤따라오는 ΔG 를 삼켜 이중계상을 막는다.
+     *
+     * <p>⚠️ 금액을 키로 쓰는 Map 이면 안 된다(2026-09-28 제보 원인). 레드스톤 50,000 과
+     * 청금석 50,000 을 연달아 받으면 "50,000 한 건"으로 뭉쳐 합산 ΔG(+100,000)를 못 삼키고,
+     * 아래 분해 경로가 그걸 다시 쪼개 레드스톤 ×3 으로 기록했다. 같은 금액이 여러 건일 수 있다.
+     */
+    private final List<long[]> pendingClaims = new ArrayList<>();
+    /** ΔG 경로로 이미 기록한 보상들 {금액, 시각} — 수령 전환이 ΔG 보다 늦게 보여도 두 번 적지 않게. */
+    private final List<long[]> deltaRecorded = new ArrayList<>();
     private volatile long lastGuiTs = 0;
     /** 마지막으로 감지한 수령(진단용, /빌띵 진단). 감지가 한 번도 안 됐으면 null. */
     private static volatile String lastClaimDetected;
@@ -129,22 +157,59 @@ public final class QuestRewardTracker {
         long now = System.currentTimeMillis();
         lastGuiTs = now;
 
+        expire(now);
         for (Entry e : entries) {
             if (e.quest() == null || e.quest().isBlank()) continue;
             Boolean prev = claimedState.get(e.quest());
             // 처음 본 의뢰는 전환이 아님(이미 수령 상태로 열었을 수 있음) → 기록하지 않는다.
             if (prev != null && !prev && e.claimed() && e.reward() > 0) {
-                sink.accept(new TransactionRecord(now, TransactionRecord.Kind.INCOME, e.reward(),
-                        "의뢰", e.quest(), 0,
-                        true, TransactionRecord.Confidence.HIGH, false, "수령 감지"));
-                justRecorded.put(e.reward(), now);
+                // 잔고 변동이 전환보다 먼저 와서 ΔG 경로로 이미 적었다면 또 적지 않는다.
+                if (!removeOne(deltaRecorded, e.reward())) {
+                    sink.accept(new TransactionRecord(now, TransactionRecord.Kind.INCOME, e.reward(),
+                            "의뢰", e.quest(), 0,
+                            true, TransactionRecord.Confidence.HIGH, false, "수령 감지"));
+                    pendingClaims.add(new long[]{e.reward(), now});
+                }
                 lastClaimDetected = e.quest() + " (" + e.reward() + ")"; // 진단용
             }
             claimedState.put(e.quest(), e.claimed());
-            if (e.reward() > 0) recentRewards.put(e.reward(), new Seen(e.quest(), now));
+            // 보조 판정 후보는 '진행도를 다 채웠고 아직 안 받은' 의뢰만.
+            //   이미 받은 의뢰는 다시 돈을 줄 수 없고, 진행도가 안 찬 의뢰는 아직 돈을 줄 수 없다.
+            //   (2026-09-28 제보: 의뢰를 하나도 안 했는데 창에 떠 있던 굴 채집 10,000 으로
+            //    무관한 +10,000 잔고 변동이 의뢰 수입으로 기록됨)
+            if (e.reward() > 0 && !e.claimed() && e.complete()) {
+                noteCandidate(e.reward(), e.quest(), now);
+                lastClaimableTs = now;
+            }
         }
+    }
+
+    /** 받을 수 있는(완료·미수령) 의뢰를 마지막으로 본 시각. 없으면 ΔG 를 의뢰로 볼 근거가 없다. */
+    private long lastClaimableTs = 0;
+
+    /**
+     * 보조 판정 후보 등록. 같은 금액의 <b>다른</b> 의뢰가 둘 이상 보이면 어느 쪽인지 알 수 없으므로
+     * 이름을 비워(null) "의뢰 완료"로 기록한다 — 금 채광 10,000 을 받았는데 창에 같이 떠 있던
+     * 굴 채집 10,000 의 이름이 붙던 문제(2026-09-28 제보: "하지 않은 의뢰가 완료됨").
+     */
+    private void noteCandidate(long reward, String quest, long now) {
+        Seen old = recentRewards.get(reward);
+        boolean ambiguous = old != null && (old.label == null || !old.label.equals(quest));
+        recentRewards.put(reward, new Seen(ambiguous ? null : quest, now));
+    }
+
+    private void expire(long now) {
         recentRewards.entrySet().removeIf(en -> now - en.getValue().ts > REWARD_MEMORY_MS);
-        justRecorded.entrySet().removeIf(en -> now - en.getValue() > REWARD_MEMORY_MS);
+        pendingClaims.removeIf(c -> now - c[1] > REWARD_MEMORY_MS);
+        deltaRecorded.removeIf(c -> now - c[1] > REWARD_MEMORY_MS);
+    }
+
+    /** list 에서 금액이 같은 항목 하나를 뺀다. 뺐으면 true. */
+    private static boolean removeOne(List<long[]> list, long amount) {
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i)[0] == amount) { list.remove(i); return true; }
+        }
+        return false;
     }
 
     /** 의뢰 창이 (유예 포함) 활성인가. */
@@ -162,13 +227,23 @@ public final class QuestRewardTracker {
         if (delta <= 0) return false;       // 보상은 수입만
 
         long amount = delta;
+        expire(now);
 
         // 수령 감지로 이미 기록한 건이면 뒤따라온 잔고 변동은 삼키기만 한다(이중계상 방지).
         // 여러 건을 연달아 받으면 잔고가 합쳐 들어오므로, 합계와 일치하는 경우도 함께 삼킨다.
-        if (swallowRecorded(amount, now)) return true;
+        if (swallowRecorded(amount)) return true;
+
+        // 수령 감지로 적어둔 보상이 아직 남아 있는데 그 조합으로 설명이 안 되는 잔고 변동이면
+        // 의뢰로 또 적지 않는다. 수령 감지 쪽이 금액·이름이 확정된 기록이고, 여기서 한 번 더 적으면
+        // 그게 곧 이중계상이다(원장 실측: 잔고 변동 경로 의뢰 7건 중 6건이 수령 감지와 겹친 중복).
+        if (!pendingClaims.isEmpty()) return false;
+
+        // 받을 수 있는 의뢰(진행도 완료·미수령)가 창에 없었다면 이 잔고 변동은 의뢰 보상일 수 없다.
+        // 아래 보상표 안전망(10,000 등 흔한 금액)도 여기서 같이 막힌다.
+        if (now - lastClaimableTs > REWARD_MEMORY_MS) return false;
 
         Seen seen = recentRewards.get(amount);
-        if (seen != null) { // 한 건과 정확히 일치 — 의뢰명까지 확정
+        if (seen != null) { // 한 건과 정확히 일치 — 이름이 겹치지 않으면 의뢰명까지 확정
             emit(now, amount, seen.label, true);
             return true;
         }
@@ -189,31 +264,28 @@ public final class QuestRewardTracker {
 
     /**
      * 수령 감지로 이미 기록한 보상들의 (단건 또는 합계)와 일치하면 그만큼 소진하고 true.
-     * 감지로 2건을 기록한 뒤 잔고가 합쳐 한 번에 들어오는 경우까지 막아야 이중계상이 없다.
+     * 같은 금액이 여러 건 남아 있어도 각각 한 번씩 쓴다(50,000 + 50,000 = 100,000).
      */
-    private boolean swallowRecorded(long amount, long now) {
-        justRecorded.entrySet().removeIf(en -> now - en.getValue() > REWARD_MEMORY_MS);
-        if (justRecorded.isEmpty()) return false;
+    private boolean swallowRecorded(long amount) {
+        if (pendingClaims.isEmpty()) return false;
+        if (removeOne(pendingClaims, amount)) return true; // 단건 일치
 
-        if (justRecorded.remove(amount) != null) return true; // 단건 일치
-
-        List<Long> keys = new ArrayList<>(justRecorded.keySet());
-        keys.sort(java.util.Comparator.reverseOrder());
-        List<Long> used = new ArrayList<>();
-        if (!searchSum(amount, keys, 0, used, 4)) return false;
-        for (Long k : used) justRecorded.remove(k);
+        List<Integer> picked = new ArrayList<>();
+        if (!searchSum(amount, 0, picked)) return false;
+        picked.sort(java.util.Comparator.reverseOrder()); // 뒤에서부터 지워야 인덱스가 안 밀린다
+        for (int idx : picked) pendingClaims.remove(idx);
         return true;
     }
 
-    /** amounts 에서 골라 remain 을 정확히 채우는 조합 찾기(각 값 1회, 최대 max 개). */
-    private boolean searchSum(long remain, List<Long> amounts, int from, List<Long> picked, int max) {
+    /** pendingClaims 에서 골라 remain 을 정확히 채우는 조합(각 항목 1회, 최대 6건). 고른 인덱스를 picked 에. */
+    private boolean searchSum(long remain, int from, List<Integer> picked) {
         if (remain == 0) return !picked.isEmpty();
-        if (picked.size() >= max || remain < 0) return false;
-        for (int i = from; i < amounts.size(); i++) {
-            long a = amounts.get(i);
+        if (picked.size() >= 6 || remain < 0) return false;
+        for (int i = from; i < pendingClaims.size(); i++) {
+            long a = pendingClaims.get(i)[0];
             if (a > remain) continue;
-            picked.add(a);
-            if (searchSum(remain - a, amounts, i + 1, picked, max)) return true;
+            picked.add(i);
+            if (searchSum(remain - a, i + 1, picked)) return true;
             picked.remove(picked.size() - 1);
         }
         return false;
@@ -223,6 +295,7 @@ public final class QuestRewardTracker {
         sink.accept(new TransactionRecord(ts, TransactionRecord.Kind.INCOME, amount,
                 "의뢰", label == null || label.isBlank() ? "의뢰 완료" : label, 0,
                 true, TransactionRecord.Confidence.HIGH, crossChecked, null));
+        deltaRecorded.add(new long[]{amount, ts});
     }
 
     /** Seen 은 라벨만 갖고 있어 금액을 되찾는다(합산 분해 결과 기록용). */

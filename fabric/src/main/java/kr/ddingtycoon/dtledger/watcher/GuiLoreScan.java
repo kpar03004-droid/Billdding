@@ -101,18 +101,22 @@ public final class GuiLoreScan {
             boolean isQuest = rawName.contains(QuestRewardTracker.GUI_SIGNATURE);
             long reward = 0;
             boolean claimed = false;
+            Boolean complete = null; // 진행도 줄을 못 읽으면 판단 보류(true 취급)
             for (Text line : lore.lines()) {
                 String text = line.getString();
                 if (text.contains(QuestRewardTracker.GUI_SIGNATURE)) isQuest = true;
                 if (QuestRewardTracker.isClaimedLine(text)) claimed = true;
                 long parsed = QuestRewardTracker.parseRewardGold(text);
                 if (parsed > 0) reward = parsed;
+                Boolean done = QuestRewardTracker.parseProgressDone(text);
+                if (done != null) complete = done;
             }
             if (!isQuest || reward <= 0) continue;
             String quest = QuestRewardTracker.questLabel(rawName);
-            out.add(new QuestRewardTracker.Entry(quest, reward, claimed));
+            boolean isComplete = complete == null || complete;
+            out.add(new QuestRewardTracker.Entry(quest, reward, claimed, isComplete));
             questSnapshot.add("§8· §f" + quest + " §7보상 " + reward
-                    + (claimed ? " §a[수령완료]" : " §e[미수령]"));
+                    + (claimed ? " §a[수령완료]" : isComplete ? " §e[미수령]" : " §7[진행중]"));
         }
         if (!out.isEmpty()) {
             questSnapshot.add(0, "§7의뢰 창 " + out.size() + "건 인식");

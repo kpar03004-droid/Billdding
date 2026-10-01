@@ -29,6 +29,7 @@ public final class DtConfig {
     public boolean feeCountedAsExpense = true;   // 수수료는 지출 포함
     public boolean showTransfers = true;         // 정산에 이체(참고) 표시
     public int dayResetHour = 0;                 // 하루 리셋 시각(0~23)
+    public String lastSeenWhatsNew = "";         // 「새로워진 점」 카드를 닫은 버전
 
     /**
      * 금액을 못 알아낸 거래를 "미확인"으로 내역에 남길지. 끄면 예전처럼 조용히 버린다.

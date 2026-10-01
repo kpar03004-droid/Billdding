@@ -14,6 +14,8 @@ public final class DailyBucket {
     public long transferIn;
     public long transferOut;
     public int count;
+    /** 잔고(지갑)에 준 영향 합 — 잔고 대조용. 금고 내부 거래는 빠진다. */
+    public long wallet;
     public final Map<String, Long> incomeByCategory = new LinkedHashMap<>();
     public final Map<String, Long> expenseByCategory = new LinkedHashMap<>();
     public final Map<String, Long> transferInByCategory = new LinkedHashMap<>();
@@ -25,6 +27,7 @@ public final class DailyBucket {
 
     public void add(TransactionRecord r) {
         count++;
+        wallet += kr.ddingtycoon.dtledger.core.WalletCheck.walletDelta(r);
         switch (r.kind) {
             case INCOME -> {
                 if (r.countedInPnl) {

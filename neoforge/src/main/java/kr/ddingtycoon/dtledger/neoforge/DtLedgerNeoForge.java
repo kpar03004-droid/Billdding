@@ -66,6 +66,7 @@ public final class DtLedgerNeoForge {
             store.commit(rec);
             aggregator.addLive(rec);
             vault.onRecord(rec);
+            kr.ddingtycoon.dtledger.core.ActivityLog.record(rec);
         };
         TransactionResolver resolver = new TransactionResolver(config, classifier, sink);
         // 금액을 못 알아낸 거래를 채팅으로 알린다 — 조용히 사라지면 유저가 알 방법이 없다.
@@ -82,6 +83,7 @@ public final class DtLedgerNeoForge {
         SeaBlessingTracker seaBlessing = new SeaBlessingTracker(sink); // 바다의 가호(지출)
         QuestRewardTracker questReward = new QuestRewardTracker(sink); // 일일/주간 의뢰(수입)
         NeoBalanceWatcher balanceWatcher = new NeoBalanceWatcher(config, delta -> {
+            kr.ddingtycoon.dtledger.core.ActivityLog.delta(delta);
             if (seaBlessing.tryConsume(delta)) return;
             if (questReward.tryConsume(delta)) return;
             resolver.onDelta(delta);
@@ -114,6 +116,9 @@ public final class DtLedgerNeoForge {
 
             balanceWatcher.tick(mc, now);
             resolver.tick(now);
+            kr.ddingtycoon.dtledger.core.WalletCheck.LIVE.observe(now, balanceWatcher.confirmedBalance(),
+                    kr.ddingtycoon.dtledger.util.LedgerDates.today(config.dayResetHour),
+                    aggregator.today().wallet, resolver.isIdle());
             store.tick(now);
             keys.tick(mc);
             if (probe != null) probe.tick(mc);
@@ -143,6 +148,7 @@ public final class DtLedgerNeoForge {
 
         NeoForge.EVENT_BUS.addListener((ClientPlayerNetworkEvent.LoggingIn e) -> {
             balanceWatcher.reset();
+            kr.ddingtycoon.dtledger.core.WalletCheck.LIVE.reset();
             checkForUpdate(config);
         });
         NeoForge.EVENT_BUS.addListener((ClientPlayerNetworkEvent.LoggingOut e) -> store.flushNow());
@@ -265,6 +271,8 @@ public final class DtLedgerNeoForge {
         TradeSignal sig = parser.parse(message);
         if (sig != null) {
             resolver.onSignal(sig);
+        } else {
+            kr.ddingtycoon.dtledger.core.ActivityLog.unmatched(message);
         }
     }
 }

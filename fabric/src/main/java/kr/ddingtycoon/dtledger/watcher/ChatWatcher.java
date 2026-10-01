@@ -50,6 +50,8 @@ public final class ChatWatcher {
         TradeSignal sig = parser.parse(s);
         if (sig != null) {
             signalSink.accept(sig);
+        } else {
+            kr.ddingtycoon.dtledger.core.ActivityLog.unmatched(s);
         }
     }
 }

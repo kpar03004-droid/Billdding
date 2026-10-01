@@ -62,6 +62,7 @@ public final class DtLedgerClient implements ClientModInitializer {
             store.commit(rec);
             aggregator.addLive(rec);
             vault.onRecord(rec);
+            kr.ddingtycoon.dtledger.core.ActivityLog.record(rec);
         };
         TransactionResolver resolver = new TransactionResolver(config, classifier, sink);
         // 금액을 못 알아낸 거래를 채팅으로 알린다 — 조용히 사라지면 유저가 알 방법이 없다.
@@ -80,6 +81,7 @@ public final class DtLedgerClient implements ClientModInitializer {
         CurrencyParser parser = CurrencyParser.createDefault();
         // ΔG 는 GUI 트래커들이 먼저 가져가고(정확한 금액을 아는 쪽 우선), 아니면 기존 Resolver 로.
         BalanceWatcher balanceWatcher = new BalanceWatcher(config, delta -> {
+            kr.ddingtycoon.dtledger.core.ActivityLog.delta(delta);
             if (seaBlessing.tryConsume(delta)) return;
             if (questReward.tryConsume(delta)) return;
             resolver.onDelta(delta);
@@ -128,6 +130,9 @@ public final class DtLedgerClient implements ClientModInitializer {
 
             balanceWatcher.tick(client, now);   // 시간 기반 — 매 틱 유지
             resolver.tick(now);
+            kr.ddingtycoon.dtledger.core.WalletCheck.LIVE.observe(now, balanceWatcher.confirmedBalance(),
+                    kr.ddingtycoon.dtledger.util.LedgerDates.today(config.dayResetHour),
+                    aggregator.today().wallet, resolver.isIdle());
             store.tick(now);
 
             // 새 버전 재확인 — 실제 네트워크 요청은 UpdateChecker 가 1시간 간격으로만 낸다.
@@ -138,6 +143,7 @@ public final class DtLedgerClient implements ClientModInitializer {
         // 접속 시 잔고 기준선 리셋, 종료 시 저장 flush
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             balanceWatcher.reset();
+            kr.ddingtycoon.dtledger.core.WalletCheck.LIVE.reset();
             checkForUpdate(config, client);
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> store.flushNow());

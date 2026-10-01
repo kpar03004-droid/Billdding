@@ -164,4 +164,115 @@ class QuestRewardTrackerTest {
         assertEquals(1, out.size());
         assertEquals("청어 낚기 일일 의뢰", out.get(0).label);
     }
+
+    // ───────── 2026-09-28 제보: 의뢰 ×3 중복 · 하지 않은 의뢰가 완료로 찍힘 ─────────
+
+    @Test
+    void 같은_보상액_두건_수령후_합산ΔG는_삼킨다() {
+        // 레드스톤 50,000 + 청금석 50,000 → 잔고 +100,000. 예전엔 레드스톤 ×3 으로 기록됐다.
+        List<TransactionRecord> out = new ArrayList<>();
+        QuestRewardTracker t = new QuestRewardTracker(out::add);
+        t.updateGui(List.of(q("레드스톤 채광하기 일일 의뢰", 50_000, false), q("청금석 채광하기 일일 의뢰", 50_000, false)));
+        t.updateGui(List.of(q("레드스톤 채광하기 일일 의뢰", 50_000, true), q("청금석 채광하기 일일 의뢰", 50_000, true)));
+        assertEquals(2, out.size(), "수령 감지로 2건");
+
+        assertTrue(t.tryConsume(100_000), "합산 잔고 변동은 삼켜야 함");
+        assertEquals(2, out.size(), "레드스톤이 더 찍히면 안 됨");
+        assertEquals(1, out.stream().filter(r -> r.label.contains("레드스톤")).count());
+        assertEquals(1, out.stream().filter(r -> r.label.contains("청금석")).count());
+    }
+
+    @Test
+    void 같은_보상액_두건_수령후_ΔG가_따로와도_각각_삼킨다() {
+        List<TransactionRecord> out = new ArrayList<>();
+        QuestRewardTracker t = new QuestRewardTracker(out::add);
+        t.updateGui(List.of(q("레드스톤 채광하기 일일 의뢰", 20_000, false), q("청금석 채광하기 일일 의뢰", 20_000, false)));
+        t.updateGui(List.of(q("레드스톤 채광하기 일일 의뢰", 20_000, true), q("청금석 채광하기 일일 의뢰", 20_000, true)));
+
+        assertTrue(t.tryConsume(20_000));
+        assertTrue(t.tryConsume(20_000), "두 번째 20,000 도 이미 기록된 것 — 삼켜야 함");
+        assertEquals(2, out.size());
+    }
+
+    @Test
+    void 수령기록이_남아있는데_설명안되는_ΔG는_의뢰로_또_적지_않는다() {
+        // 금 10,000 을 받아 수령 감지로 적은 직후, 창에 굴 10,000(안 한 의뢰)이 떠 있는 상태에서
+        // 조합이 안 맞는 잔고 변동이 오면 그걸 의뢰로 만들지 않는다.
+        List<TransactionRecord> out = new ArrayList<>();
+        QuestRewardTracker t = new QuestRewardTracker(out::add);
+        t.updateGui(List.of(q("금 채광하기 일일 의뢰", 10_000, false), q("굴 채집하기 일일 의뢰", 10_000, false)));
+        t.updateGui(List.of(q("금 채광하기 일일 의뢰", 10_000, true), q("굴 채집하기 일일 의뢰", 10_000, false)));
+        assertEquals(1, out.size());
+
+        assertFalse(t.tryConsume(30_000), "보상표 값이어도 수령 기록과 안 맞으면 의뢰가 아님");
+        assertEquals(1, out.size());
+        assertTrue(out.stream().noneMatch(r -> r.label.contains("굴")), "안 한 의뢰 이름이 찍히면 안 됨");
+    }
+
+    @Test
+    void 같은_보상액_의뢰가_둘이면_이름을_추측하지_않는다() {
+        // 전환을 놓친 경우의 보조 판정 — 금·굴 둘 다 10,000 이면 어느 쪽인지 모른다.
+        List<TransactionRecord> out = new ArrayList<>();
+        QuestRewardTracker t = new QuestRewardTracker(out::add);
+        t.updateGui(List.of(q("금 채광하기 일일 의뢰", 10_000, false), q("굴 채집하기 일일 의뢰", 10_000, false)));
+
+        assertTrue(t.tryConsume(10_000));
+        assertEquals(1, out.size());
+        assertEquals("의뢰 완료", out.get(0).label, "굴/금 중 아무거나 붙이면 안 됨");
+    }
+
+    @Test
+    void 이미_받은_의뢰는_보조판정_후보가_아니다() {
+        List<TransactionRecord> out = new ArrayList<>();
+        QuestRewardTracker t = new QuestRewardTracker(out::add);
+        t.updateGui(List.of(q("금 채광하기 일일 의뢰", 10_000, true), q("굴 채집하기 일일 의뢰", 10_000, false)));
+
+        assertTrue(t.tryConsume(10_000));
+        assertEquals("굴 채집하기 일일 의뢰", out.get(0).label, "이미 받은 '금'은 다시 돈을 줄 수 없다");
+    }
+
+    @Test
+    void 진행도_파싱() {
+        assertEquals(Boolean.FALSE, QuestRewardTracker.parseProgressDone("- 의뢰 진행도 : 0 / 30"));
+        assertEquals(Boolean.FALSE, QuestRewardTracker.parseProgressDone("- 의뢰 진행도 : 29 / 30"));
+        assertEquals(Boolean.TRUE, QuestRewardTracker.parseProgressDone("- 의뢰 진행도 : 30 / 30"));
+        assertEquals(Boolean.TRUE, QuestRewardTracker.parseProgressDone("- 의뢰 진행도 : 1,200 / 1,000"));
+        assertEquals(null, QuestRewardTracker.parseProgressDone("- 보상 : 10,000골드"));
+    }
+
+    @Test
+    void 진행도가_안찬_의뢰만_있으면_ΔG를_의뢰로_안본다() {
+        // 2026-09-28 제보(2번째 사람): 의뢰를 하나도 안 했는데 창에 떠 있던 굴 채집 10,000 으로
+        // 무관한 +10,000 이 의뢰 수입으로 기록됨. 진행도 0/30 인 의뢰는 돈을 줄 수 없다.
+        List<TransactionRecord> out = new ArrayList<>();
+        QuestRewardTracker t = new QuestRewardTracker(out::add);
+        t.updateGui(List.of(new Entry("굴 채집하기 일일 의뢰", 10_000, false, false)));
+
+        assertFalse(t.tryConsume(10_000), "받을 수 있는 의뢰가 없으니 의뢰 수입이 아님");
+        assertFalse(t.tryConsume(30_000), "보상표 안전망(흔한 금액)도 같이 막혀야 함");
+        assertEquals(0, out.size());
+    }
+
+    @Test
+    void 진행도가_찬_의뢰가_있으면_보조판정은_그대로() {
+        List<TransactionRecord> out = new ArrayList<>();
+        QuestRewardTracker t = new QuestRewardTracker(out::add);
+        t.updateGui(List.of(new Entry("굴 채집하기 일일 의뢰", 10_000, false, false),
+                            new Entry("금 채광하기 일일 의뢰", 10_000, false, true)));
+
+        assertTrue(t.tryConsume(10_000));
+        assertEquals(1, out.size());
+        assertEquals("금 채광하기 일일 의뢰", out.get(0).label, "진행 중인 굴이 아니라 다 채운 금이어야 함");
+    }
+
+    @Test
+    void ΔG가_수령전환보다_먼저와도_한번만_기록() {
+        List<TransactionRecord> out = new ArrayList<>();
+        QuestRewardTracker t = new QuestRewardTracker(out::add);
+        t.updateGui(List.of(q("청어 낚기 일일 의뢰", 50_000, false)));
+
+        assertTrue(t.tryConsume(50_000));                                   // 잔고가 먼저 갱신
+        t.updateGui(List.of(q("청어 낚기 일일 의뢰", 50_000, true)));        // 그 다음 창에 '이미 완료'
+        assertEquals(1, out.size(), "두 경로가 같은 보상을 두 번 적으면 안 됨");
+    }
 }

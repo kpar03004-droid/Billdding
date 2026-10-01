@@ -233,6 +233,13 @@ public final class CurrencyParser {
                 (m, raw) -> new TradeSignal(TradeSignal.Type.ENGRAVE_INVESTIGATE,
                         ENGRAVE_INVESTIGATE_COST, 0, 0, "각인석 조사 " + m.group(1), raw));
 
+        // 13b) 수상한 각인석 일괄 조사(지출, 프로 멤버십) — 2026-09-30 실측:
+        //     "수상한 각인석 9개를 조사했습니다." 한 줄만 옴(개별 성공/실패 줄 없음).
+        //     창 "조사 비용 : 270,000골드" = 개당 비용 × 개수 → 최대 9개라 개수는 본문에서 읽는다.
+        p.addRule(13, "수상한 각인석\\s*([\\d,]+)\\s*개를\\s*조사했습니다",
+                (m, raw) -> new TradeSignal(TradeSignal.Type.ENGRAVE_INVESTIGATE,
+                        g(m, 1) * ENGRAVE_INVESTIGATE_COST, 0, 0, "각인석 일괄 조사 " + m.group(1) + "개", raw));
+
         // 14) 마을 투자(지출) — 2026-08-02 실측: "50,000골드를 마을에 투자하였습니다."
         //     확인 대화상자("...골드를 투자하시겠습니까? 완료 후에는 투자한 골드를 회수할 수 없습니다.")가
         //     먼저 뜨는데 그건 아직 돈이 안 나간 상태다 → "마을에 투자하였습니다"(완료문)만 잡는다.

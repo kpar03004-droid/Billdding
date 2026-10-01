@@ -168,6 +168,18 @@ class CurrencyParserTest {
     }
 
     @Test
+    void 각인석_일괄_조사는_개수만큼_지출() {
+        // 2026-09-30 실측: 창 "조사 수량 9개 / 조사 비용 270,000골드", 채팅은 이 한 줄뿐
+        TradeSignal s = parser.parse("수상한 각인석 9개를 조사했습니다.");
+        assertNotNull(s);
+        assertEquals(TradeSignal.Type.ENGRAVE_INVESTIGATE, s.type);
+        assertEquals(270_000, s.amount);
+        assertFalse(s.amountFromDelta);
+        assertEquals(-1, s.expectedSign());
+        assertEquals(90_000, parser.parse("수상한 각인석 3개를 조사했습니다.").amount);
+    }
+
+    @Test
     void 반려물고기_방생은_수입이고_금액은_메시지에서_읽는다() {
         // 2026-08-29 실측: "반려 물고기를 방생하여 234,000골드를 받았습니다."
         TradeSignal s = parser.parse("반려 물고기를 방생하여 234,000골드를 받았습니다.");

@@ -91,7 +91,34 @@ public final class DtStatCommand {
                             StringArgumentType.getString(ctx, "args")))));
         });
         both(root, "업데이트", "update", b -> b.executes(ctx -> openUpdateScreen()));
+        both(root, "제보", "report", b -> b.executes(ctx -> report(ctx.getSource())));
+        both(root, "건의", "feedback", b -> b.executes(ctx -> report(ctx.getSource())));
         return root;
+    }
+
+    /**
+     * /빌띵 제보 — 최근 채팅·잔고 변동·기록을 디스코드용 평문으로 클립보드에 넣는다.
+     * 서버로는 아무것도 보내지 않는다. 붙여넣을지는 사용자가 정한다.
+     * @return 채팅 안내 문구
+     */
+    private int report(FabricClientCommandSource src) {
+        send(src, copyReport());
+        String url = kr.ddingtycoon.dtledger.core.ActivityLog.REPORT_FORM_URL;
+        src.sendFeedback(net.minecraft.text.Text.literal("§b§n » 제보·건의 폼 열기 (여기 클릭)")
+                .styled(st -> st.withClickEvent(new net.minecraft.text.ClickEvent(
+                        net.minecraft.text.ClickEvent.Action.OPEN_URL, url))));
+        return 1;
+    }
+
+    static String copyReport() {
+        String ver = net.fabricmc.loader.api.FabricLoader.getInstance()
+                .getModContainer("billding")
+                .map(c -> c.getMetadata().getVersion().getFriendlyString())
+                .orElse("?");
+        String text = kr.ddingtycoon.dtledger.core.ActivityLog.report(kr.ddingtycoon.dtledger.core.ActivityLog.header(
+                ver, "fabric", kr.ddingtycoon.dtledger.watcher.BalanceWatcher.lastReadInfo()));
+        MinecraftClient.getInstance().keyboard.setClipboard(text);
+        return "§a제보용 기록을 클립보드에 복사했어요. §7디스코드 제보 글에 Ctrl+V 로 붙여 주세요.";
     }
 
     /**

@@ -253,6 +253,7 @@ public final class TransactionResolver {
         if (sig == null) return;
         long now = System.currentTimeMillis();
         lastSignalInfo = sig.type + " · " + sig.label;
+        ActivityLog.signal(sig);
 
         // 은행/금고 입출금은 서버가 같은 거래를 2줄로 방송하는 경우가 있음(2026-07-27 제보:
         // "입금 시 채팅 2번 → 지출 2번 계상"). 같은 유형·같은 금액이 시간창 안에 또 오면 무시.
@@ -306,6 +307,11 @@ public final class TransactionResolver {
         lastDeltaTs = now;
         lastDeltaInfo = (delta > 0 ? "+" : "") + delta;
         deltas.add(new PendingDelta(delta, now));
+    }
+
+    /** 처리 대기 중인 신호·ΔG 가 없는가 — 잔고 대조가 "지금 값이 확정된 상태"인지 판단. */
+    public boolean isIdle() {
+        return signals.isEmpty() && deltas.isEmpty();
     }
 
     /** ΔG 를 기다리는 신호(금액 산정용 또는 내 거래 확인용)가 남아 있는가 — 델타 보관 연장 판단. */

@@ -119,6 +119,25 @@ public final class DailyAggregator {
     }
 
     /**
+     * 잘못 기록된 레코드의 금액·카테고리·설명을 고친다(내역에서 클릭 → 관리 탭 수정).
+     * 원래 값은 비고에 남겨 CSV 로도 추적된다. 확인된 값이므로 신뢰도는 HIGH.
+     */
+    public void editRecord(TransactionRecord r, long amount, String category, String label) {
+        if (r == null || amount < 0) return;
+        if (r.amount == amount && java.util.Objects.equals(r.category, category)
+                && java.util.Objects.equals(r.label, label)) return;
+        String before = "수동 수정(원래 " + kr.ddingtycoon.dtledger.util.GoldFormat.format(r.amount)
+                + " · " + r.category + (r.label == null || r.label.isEmpty() ? "" : " · " + r.label) + ")";
+        r.amount = amount;
+        r.category = category;
+        r.label = label;
+        r.confidence = TransactionRecord.Confidence.HIGH;
+        r.note = r.note == null || r.note.isEmpty() ? before : before + " / " + r.note;
+        store.markEdited(r);
+        rebuild();
+    }
+
+    /**
      * 메모리 집계를 원장에서 다시 계산. 부분 삭제 후 합계·내역을 정확히 맞추기 위해
      * 누적값을 빼는 대신 통째로 재구성한다(반올림·누락 없이 항상 원장과 일치).
      */

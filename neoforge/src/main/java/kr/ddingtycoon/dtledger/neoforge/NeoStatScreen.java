@@ -6,6 +6,8 @@ import kr.ddingtycoon.dtledger.aggregate.RecordGrouping;
 import kr.ddingtycoon.dtledger.config.DtConfig;
 import kr.ddingtycoon.dtledger.core.TransactionRecord;
 import kr.ddingtycoon.dtledger.core.VaultTracker;
+import kr.ddingtycoon.dtledger.core.WalletCheck;
+import kr.ddingtycoon.dtledger.ui.WhatsNew;
 import kr.ddingtycoon.dtledger.util.GoldFormat;
 import kr.ddingtycoon.dtledger.util.LedgerDates;
 import net.minecraft.client.gui.GuiGraphics;
@@ -41,7 +43,12 @@ public final class NeoStatScreen extends Screen {
     private final VaultTracker vault;
     private final NeoLedgerHud hud;
     private final java.util.function.Consumer<TransactionRecord> sink;
-    private int tab = 0;
+    private int tab = lastTab;
+    /** 창을 닫았다 열어도 보던 탭 유지(게임 켜 있는 동안). 관리 탭 수정 모드는 이어가지 않는다. */
+    private static int lastTab = 0;
+    private NeoTexButton copyButton;
+    /** 새로워진 점 카드 영역 — 클릭하면 닫는다(렌더에서 갱신). */
+    private int whatsNewBottom = -1;
 
     private EditBox vaultInput;
     private NeoTexButton vaultApply;
@@ -56,12 +63,19 @@ public final class NeoStatScreen extends Screen {
     private NeoTexButton mResetWeek;
     private NeoTexButton mResetDate;
     private EditBox mDate;
+    // 기록 수정 모드(내역 탭에서 줄 클릭) — null 이면 평소의 수동 입력
+    private List<TransactionRecord> editing;
+    private String editOriginal = "";
+    private EditBox mCategory;
+    private NeoTexButton mSave;
+    private NeoTexButton mCancel;
     /** 확인 대기 중인 초기화 버튼(0=없음 1=오늘 2=최근7일 3=지정날짜) — 오폭 방지 2단계 확인. */
     private int resetArmedKind;
 
     private NeoTexButton sHud;
     private NeoTexButton sOpacityDown;
     private NeoTexButton sOpacityUp;
+    private NeoTexButton sReport;
 
     private static final int VISIBLE_PENDING = 12;
     private int pendingScroll;
@@ -87,13 +101,15 @@ public final class NeoStatScreen extends Screen {
             final int idx = i;
             addRenderableWidget(new NeoTabButton(x + PAD + i * TAB_STEP, tabY, TAB_W, TAB_H, Component.literal(names[i]),
                     () -> this.tab == idx, () -> {
-                this.tab = idx;
-                resetArmedKind = 0; // 탭 이동 시 확인 대기 취소
-                updateWidgets();
+                switchTab(idx);
             }));
         }
 
         int cy = TOP + 62;
+
+        // 오늘·주간 정산 복사(디스코드 붙여넣기용) — Ctrl+C 와 같은 동작
+        copyButton = new NeoTexButton(x + PAD + 34, TOP + 20, 40, 14, Component.literal("복사"), this::copyShare);
+        addRenderableWidget(copyButton);
 
         vaultInput = new EditBox(this.font, x + PAD + 2, cy + 16, 146, 14, Component.literal("금고 잔액"));
         vaultInput.setMaxLength(11);
@@ -123,6 +139,16 @@ public final class NeoStatScreen extends Screen {
         mLabel.setBordered(false);
         mLabel.setTextColor(NeoGuiTex.TEXT);
         addRenderableWidget(mLabel);
+
+        mCategory = new EditBox(this.font, x + PAD + 118, cy + 14, 96, 14, Component.literal("카테고리"));
+        mCategory.setMaxLength(20);
+        mCategory.setBordered(false);
+        mCategory.setTextColor(NeoGuiTex.TEXT);
+        addRenderableWidget(mCategory);
+        mSave = new NeoTexButton(x + PAD, cy + 36, 150, 18, Component.literal("수정 저장"), this::saveEdit);
+        addRenderableWidget(mSave);
+        mCancel = new NeoTexButton(x + W - PAD - 150, cy + 36, 150, 18, Component.literal("취소"), () -> switchTab(2));
+        addRenderableWidget(mCancel);
 
         mIncome = new NeoTexButton(x + PAD, cy + 36, 150, 18, Component.literal("+ 수입 추가"), () -> addManual(true));
         addRenderableWidget(mIncome);
@@ -158,25 +184,73 @@ public final class NeoStatScreen extends Screen {
         addRenderableWidget(sOpacityDown);
         sOpacityUp = new NeoTexButton(x + W - PAD - 30, cy + 42, 30, 18, Component.literal("+"), () -> adjustOpacity(0.1f));
         addRenderableWidget(sOpacityUp);
+        sReport = new NeoTexButton(x + PAD, cy + 88, W - PAD * 2, 20, Component.literal("제보용 기록 복사"), () -> {
+            NeoStatCommand.copyReport();
+            sReport.setMessage(Component.literal("복사했어요 · 디스코드에 Ctrl+V"));
+        });
+        addRenderableWidget(sReport);
 
         updateWidgets();
     }
 
+    private void switchTab(int idx) {
+        this.tab = idx;
+        lastTab = idx == 4 ? 0 : idx; // 관리 탭은 입력 중 상태라 다음에 열 때 이어가지 않는다
+        resetArmedKind = 0; // 탭 이동 시 확인 대기 취소
+        if (editing != null) cancelEdit();
+        updateWidgets();
+    }
+
+    private void copyShare() {
+        String text = tab == 1 ? kr.ddingtycoon.dtledger.aggregate.ShareText.week(aggregator.lastDays(7))
+                : kr.ddingtycoon.dtledger.aggregate.ShareText.day(aggregator.today());
+        this.minecraft.keyboardHandler.setClipboard(text);
+        copyButton.setMessage(Component.literal("복사됨"));
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // 입력칸에 쓰는 중이면 숫자·Ctrl+C 는 입력칸 몫
+        if (!(getFocused() instanceof EditBox eb && eb.isFocused())) {
+            if (hasControlDown() && keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_C && (tab == 0 || tab == 1)) {
+                copyShare();
+                return true;
+            }
+            if (!hasControlDown() && keyCode >= org.lwjgl.glfw.GLFW.GLFW_KEY_1 && keyCode <= org.lwjgl.glfw.GLFW.GLFW_KEY_6) {
+                switchTab(keyCode - org.lwjgl.glfw.GLFW.GLFW_KEY_1);
+                return true;
+            }
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
     private void updateWidgets() {
+        if (copyButton != null) {
+            copyButton.visible = tab == 0 || tab == 1;
+            copyButton.setMessage(Component.literal("복사"));
+        }
         boolean vaultEditor = tab == 3 && (!vault.isSet() || editingVault);
         vaultInput.visible = vaultEditor;
         vaultApply.visible = vaultEditor;
         vaultResync.visible = tab == 3 && vault.isSet() && !editingVault;
 
         boolean manage = tab == 4;
+        boolean edit = manage && editing != null;
         mAmount.visible = manage;
         mLabel.visible = manage;
-        mIncome.visible = manage;
-        mExpense.visible = manage;
-        mReset.visible = manage;
-        if (mResetWeek != null) mResetWeek.visible = manage;
-        if (mResetDate != null) mResetDate.visible = manage;
-        if (mDate != null) mDate.visible = manage;
+        // 수정 모드: 금액 | 카테고리 | 설명 세 칸, 평소: 금액 | 설명 두 칸
+        int x = panelX();
+        mLabel.setX(edit ? x + PAD + 222 : x + PAD + 118);
+        mLabel.setWidth(edit ? W - PAD * 2 - 224 : W - PAD * 2 - 120);
+        mCategory.visible = edit;
+        mSave.visible = edit;
+        mCancel.visible = edit;
+        mIncome.visible = manage && !edit;
+        mExpense.visible = manage && !edit;
+        mReset.visible = manage && !edit;
+        if (mResetWeek != null) mResetWeek.visible = manage && !edit;
+        if (mResetDate != null) mResetDate.visible = manage && !edit;
+        if (mDate != null) mDate.visible = manage && !edit;
         if (mReset != null) mReset.setMessage(Component.literal(
                 resetArmedKind == 1 ? "정말 지울까요?" : "오늘 초기화"));
         if (mResetWeek != null) mResetWeek.setMessage(Component.literal(
@@ -187,6 +261,7 @@ public final class NeoStatScreen extends Screen {
         if (sHud != null) sHud.visible = tab == 5;
         if (sOpacityDown != null) sOpacityDown.visible = tab == 5;
         if (sOpacityUp != null) sOpacityUp.visible = tab == 5;
+        if (sReport != null) sReport.visible = tab == 5;
     }
 
     private void adjustOpacity(float delta) {
@@ -261,21 +336,8 @@ public final class NeoStatScreen extends Screen {
      * @return 지웠으면 true
      */
     private boolean deleteRowAt(double mouseX, double mouseY) {
-        int x = panelX();
-        int left = x + PAD, right = x + W - PAD;
-        if (mouseX < left || mouseX > right) return false;
-
-        List<RecordGrouping.Grouped> p = groupedPending();
-        if (p.isEmpty()) return false;
-        int total = p.size();
-        int start = Math.max(0, Math.min(pendingScroll, Math.max(0, total - VISIBLE_PENDING)));
-        int end = Math.min(total, start + VISIBLE_PENDING);
-
-        int y0 = TOP + 62; // renderPending 시작 y 와 동일해야 함
-        int row = (int) ((mouseY - y0) / ROW_H);
-        if (row < 0 || row >= end - start) return false;
-
-        RecordGrouping.Grouped g = p.get(total - 1 - (start + row)); // 최신이 위 — 렌더와 동일 순서
+        RecordGrouping.Grouped g = rowAt(mouseX, mouseY);
+        if (g == null) return false;
         boolean removed = false;
         for (TransactionRecord r : g.sources()) {
             if (aggregator.deleteRecord(r)) removed = true;
@@ -284,9 +346,88 @@ public final class NeoStatScreen extends Screen {
         return removed;
     }
 
+    /** 내역 탭에서 마우스 아래 줄. 없으면 null. */
+    private RecordGrouping.Grouped rowAt(double mouseX, double mouseY) {
+        int x = panelX();
+        int left = x + PAD, right = x + W - PAD;
+        if (mouseX < left || mouseX > right) return null;
+
+        List<RecordGrouping.Grouped> p = groupedPending();
+        if (p.isEmpty()) return null;
+        int total = p.size();
+        int start = Math.max(0, Math.min(pendingScroll, Math.max(0, total - VISIBLE_PENDING)));
+        int end = Math.min(total, start + VISIBLE_PENDING);
+
+        int y0 = TOP + 62; // renderPending 시작 y 와 동일해야 함
+        if (mouseY < y0) return null;
+        int row = (int) ((mouseY - y0) / ROW_H);
+        if (row >= end - start) return null;
+        return p.get(total - 1 - (start + row)); // 최신이 위 — 렌더와 동일 순서
+    }
+
+    /** 내역 줄 클릭 → 관리 탭을 수정 모드로. 묶음(×N)이면 N건 모두 같은 값으로 고친다. */
+    private void startEdit(RecordGrouping.Grouped g) {
+        TransactionRecord first = g.sources().get(0);
+        editing = List.copyOf(g.sources());
+        editOriginal = (first.kind == TransactionRecord.Kind.INCOME || first.kind == TransactionRecord.Kind.TRANSFER_IN ? "+" : "-")
+                + GoldFormat.format(first.amount) + " · " + first.category
+                + (first.label == null || first.label.isEmpty() || first.label.equals(first.category) ? "" : " · " + first.label)
+                + (g.count() > 1 ? "  (×" + g.count() + "건 모두)" : "");
+        mAmount.setValue(String.valueOf(first.amount));
+        mCategory.setValue(first.category == null ? "" : first.category);
+        mLabel.setValue(first.label == null ? "" : first.label);
+        tab = 4;
+        resetArmedKind = 0;
+        updateWidgets();
+    }
+
+    private void saveEdit() {
+        String digits = mAmount.getValue().replaceAll("[^0-9]", "");
+        if (editing == null || digits.isEmpty()) return;
+        long amt;
+        try {
+            amt = Long.parseLong(digits);
+        } catch (NumberFormatException e) {
+            return;
+        }
+        String cat = mCategory.getValue().isBlank() ? "기타" : mCategory.getValue().trim();
+        String label = mLabel.getValue().trim();
+        for (TransactionRecord r : editing) aggregator.editRecord(r, amt, cat, label);
+        switchTab(2); // 고친 결과를 바로 확인
+    }
+
+    private void cancelEdit() {
+        editing = null;
+        editOriginal = "";
+        mAmount.setValue("");
+        mCategory.setValue("");
+        mLabel.setValue("");
+    }
+
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (tab == 2 && button == 0 && hasShiftDown() && deleteRowAt(mouseX, mouseY)) {
+        if (tab == 2 && button == 0) {
+            if (hasShiftDown()) {
+                if (deleteRowAt(mouseX, mouseY)) return true;
+            } else {
+                RecordGrouping.Grouped g = rowAt(mouseX, mouseY);
+                if (g != null) {
+                    startEdit(g);
+                    return true;
+                }
+            }
+        }
+        if (tab == 0 && button == 0 && mouseY < whatsNewBottom && mouseY >= TOP + 62
+                && WhatsNew.unseen(config.lastSeenWhatsNew)) {
+            config.lastSeenWhatsNew = WhatsNew.VERSION;
+            config.save();
+            return true;
+        }
+        // 잔고 대조 경고 줄 클릭 = "알고 넘어감"(기준을 지금으로)
+        Long gap = WalletCheck.LIVE.unexplained();
+        if (tab == 0 && button == 0 && gap != null && gap != 0
+                && mouseY >= walletLineY - 2 && mouseY < walletLineY + 11) {
+            WalletCheck.LIVE.acknowledge(System.currentTimeMillis());
             return true;
         }
         return super.mouseClicked(mouseX, mouseY, button);
@@ -339,12 +480,12 @@ public final class NeoStatScreen extends Screen {
             case 0 -> {
                 DailyBucket b = aggregator.today();
                 int cats = shownCats(b.incomeByCategory) + shownCats(b.expenseByCategory);
-                yield 64 + (cats > 0 ? 16 + cats * ROW_H : 0) + (showTransfers(b) ? 16 : 0);
+                yield 64 + (cats > 0 ? 16 + cats * ROW_H : 0) + (showTransfers(b) ? 16 : 0) + 14 + whatsNewHeight();
             }
             case 1 -> 7 * (ROW_H + 1) + 26 + ROW_H; // +범례 한 줄
             case 2 -> Math.max(28, Math.min(Math.max(groupedPending().size(), 1), VISIBLE_PENDING) * ROW_H + 16);
-            case 4 -> 140; // 수동입력 + 초기화 3종(날짜칸·안내문 포함) — 패널 밖 넘침 방지
-            case 5 -> 92;
+            case 4 -> editing != null ? 84 : 140; // 수동입력 + 초기화 3종(날짜칸·안내문 포함) — 패널 밖 넘침 방지
+            case 5 -> 114;
             default -> (!vault.isSet() || editingVault) ? 56 : 128;
         };
     }
@@ -355,10 +496,29 @@ public final class NeoStatScreen extends Screen {
         return config.showTransfers && (b.transferIn > 0 || b.transferOut > 0);
     }
 
+    private int whatsNewHeight() {
+        return WhatsNew.unseen(config.lastSeenWhatsNew) ? 22 + WhatsNew.LINES.size() * 11 : 0;
+    }
+
     private void renderToday(GuiGraphics ctx, int x, int y) {
         DailyBucket b = aggregator.today();
         long net = b.netPnl();
         int left = x + PAD, right = x + W - PAD;
+
+        int wn = whatsNewHeight();
+        if (wn > 0) {
+            NeoGuiTex.sprite(ctx, "tex_card", left, y, right - left, wn - 4);
+            ctx.drawString(font, WhatsNew.VERSION + " 새로워진 점", left + 8, y + 5, NeoGuiTex.TITLE, false);
+            String close = "클릭하면 닫힘";
+            ctx.drawString(font, close, right - 8 - font.width(close), y + 5, NeoGuiTex.LABEL, false);
+            int ly = y + 16;
+            for (String l : WhatsNew.LINES) {
+                ctx.drawString(font, font.plainSubstrByWidth("· " + l, right - left - 16), left + 8, ly, NeoGuiTex.TEXT, false);
+                ly += 11;
+            }
+            y += wn;
+        }
+        whatsNewBottom = y;
 
         NeoGuiTex.sprite(ctx, "tex_card", left, y, right - left, 30);
         ctx.drawString(font, "오늘 순익", left + 8, y + 5, NeoGuiTex.LABEL, false);
@@ -367,6 +527,13 @@ public final class NeoStatScreen extends Screen {
         ctx.drawString(font, netStr, left + 8, y + 16, netColor, false);
         String cnt = b.count + "건";
         ctx.drawString(font, cnt, right - 8 - font.width(cnt), y + 16, NeoGuiTex.LABEL, false);
+        DailyBucket yday = aggregator.day(b.date.minusDays(1));
+        if (yday.count > 0) {
+            long diff = net - yday.netPnl();
+            String vs = "어제보다 " + GoldFormat.signed(diff);
+            ctx.drawString(font, vs, right - 8 - font.width(vs), y + 5,
+                    diff >= 0 ? NeoGuiTex.GREEN : NeoGuiTex.RED, false);
+        }
         y += 36;
 
         int half = (right - left - 8) / 2;
@@ -393,8 +560,32 @@ public final class NeoStatScreen extends Screen {
             y += 4;
             String tr = "이체(손익 제외)  +" + GoldFormat.format(b.transferIn) + " / -" + GoldFormat.format(b.transferOut);
             ctx.drawString(font, tr, left, y, NeoGuiTex.BLUE, false);
+            y += 12;
         }
+
+        y += 4;
+        walletLineY = y;
+        Long gap = WalletCheck.LIVE.unexplained();
+        String line;
+        int color;
+        if (!WalletCheck.LIVE.started()) {
+            line = "잔고 대조 · 잔고를 못 읽어 확인할 수 없어요";
+            color = NeoGuiTex.LABEL;
+        } else if (gap == null) {
+            line = "잔고 대조 · 확인 중…";
+            color = NeoGuiTex.LABEL;
+        } else if (gap == 0) {
+            line = "✔ 잔고 대조 · 이번 접속 동안 기록과 잔고가 일치";
+            color = NeoGuiTex.GREEN;
+        } else {
+            line = "⚠ 기록에 없는 잔고 변동 " + GoldFormat.signed(gap) + " G · 클릭하면 넘어감";
+            color = NeoGuiTex.RED;
+        }
+        ctx.drawString(font, font.plainSubstrByWidth(line, right - left), left, y, color, false);
     }
+
+    /** 오늘 탭 잔고 대조 줄의 y — 클릭 판정용(렌더에서 갱신). */
+    private int walletLineY = -1;
 
     private int catRows(GuiGraphics ctx, Map<String, Long> map, int left, int right, int y,
                         long max, int accent) {
@@ -534,7 +725,7 @@ public final class NeoStatScreen extends Screen {
             ctx.drawString(font, pos, left, y + 2, NeoGuiTex.LABEL, false);
         }
         // 잘못 들어간 기록만 지우는 방법 안내(2026-07-28)
-        String tip = "Shift+클릭 = 그 줄 삭제";
+        String tip = "클릭 = 수정 · Shift+클릭 = 삭제";
         ctx.drawString(font, tip, right - font.width(tip), y + 2, NeoGuiTex.LABEL, false);
     }
 
@@ -610,6 +801,18 @@ public final class NeoStatScreen extends Screen {
     // ── 관리 탭 (수동 입력 + 오늘 초기화) ──
     private void renderManage(GuiGraphics ctx, int x, int y) {
         int left = x + PAD;
+        if (editing != null) {
+            ctx.drawString(font, "금액", left, y, NeoGuiTex.LABEL, false);
+            ctx.drawString(font, "카테고리", x + PAD + 116, y, NeoGuiTex.LABEL, false);
+            ctx.drawString(font, "설명", x + PAD + 220, y, NeoGuiTex.LABEL, false);
+            NeoGuiTex.sprite(ctx, "tex_input", x + PAD, y + 12, 110, 18);
+            NeoGuiTex.sprite(ctx, "tex_input", x + PAD + 116, y + 12, 100, 18);
+            NeoGuiTex.sprite(ctx, "tex_input", x + PAD + 220, y + 12, W - PAD * 2 - 220, 18);
+            ctx.drawString(font, font.plainSubstrByWidth("원래  " + editOriginal, W - PAD * 2),
+                    left, y + 60, NeoGuiTex.TEXT, false);
+            ctx.drawString(font, "고친 값은 비고에 원래 값과 함께 남습니다.", left, y + 72, NeoGuiTex.LABEL, false);
+            return;
+        }
         ctx.drawString(font, "금액", left, y, NeoGuiTex.LABEL, false);
         ctx.drawString(font, "설명 (선택)", x + PAD + 116, y, NeoGuiTex.LABEL, false);
         NeoGuiTex.sprite(ctx, "tex_input", x + PAD, y + 12, 110, 18);
@@ -619,7 +822,7 @@ public final class NeoStatScreen extends Screen {
         // 날짜 지정 초기화 — 잘못 기록된 특정 날짜만 지울 때
         ctx.drawString(font, "날짜  예) 2026-07-28 · 비우면 오늘", left, y + 90, NeoGuiTex.LABEL, false);
         NeoGuiTex.sprite(ctx, "tex_input", x + PAD, y + 102, 110, 18);
-        ctx.drawString(font, "내역 탭에서 항목을 Shift+클릭하면 그 기록만 삭제됩니다.",
+        ctx.drawString(font, "내역 탭: 클릭하면 수정, Shift+클릭하면 삭제됩니다.",
                 left, y + 124, NeoGuiTex.LABEL, false);
     }
 

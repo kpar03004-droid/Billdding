@@ -78,16 +78,19 @@ public final class NeoGuiLoreScan {
             boolean isQuest = rawName.contains(QuestRewardTracker.GUI_SIGNATURE);
             long reward = 0;
             boolean claimed = false;
+            Boolean complete = null; // 진행도 줄을 못 읽으면 판단 보류(true 취급)
             for (Component line : lore.lines()) {
                 String text = line.getString();
                 if (text.contains(QuestRewardTracker.GUI_SIGNATURE)) isQuest = true;
                 if (QuestRewardTracker.isClaimedLine(text)) claimed = true;
                 long parsed = QuestRewardTracker.parseRewardGold(text);
                 if (parsed > 0) reward = parsed;
+                Boolean done = QuestRewardTracker.parseProgressDone(text);
+                if (done != null) complete = done;
             }
             if (!isQuest || reward <= 0) continue;
             out.add(new QuestRewardTracker.Entry(
-                    QuestRewardTracker.questLabel(rawName), reward, claimed));
+                    QuestRewardTracker.questLabel(rawName), reward, claimed, complete == null || complete));
         }
         return out;
     }
