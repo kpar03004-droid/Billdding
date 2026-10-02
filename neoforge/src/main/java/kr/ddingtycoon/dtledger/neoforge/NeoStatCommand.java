@@ -97,7 +97,7 @@ public final class NeoStatCommand {
     private int report(CommandSourceStack src) {
         send(src, copyReport());
         String url = kr.ddingtycoon.dtledger.core.ActivityLog.REPORT_FORM_URL;
-        src.sendSuccess(() -> Component.literal("§b§n » 제보·건의 폼 열기 (여기 클릭)")
+        src.sendSuccess(() -> NeoChatText.of("§b§n » 제보·건의 폼 열기 (여기 클릭)")
                 .withStyle(st -> st.withClickEvent(new net.minecraft.network.chat.ClickEvent(
                         net.minecraft.network.chat.ClickEvent.Action.OPEN_URL, url))), false);
         return 1;
@@ -327,6 +327,6 @@ public final class NeoStatCommand {
     }
 
     private void send(CommandSourceStack src, String msg) {
-        src.sendSuccess(() -> Component.literal(msg), false);
+        src.sendSuccess(() -> NeoChatText.of(msg), false);
     }
 }

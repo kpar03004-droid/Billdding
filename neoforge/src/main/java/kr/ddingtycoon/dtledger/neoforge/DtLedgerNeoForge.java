@@ -74,7 +74,7 @@ public final class DtLedgerNeoForge {
             Minecraft m = Minecraft.getInstance();
             m.execute(() -> {
                 if (m.player == null) return;
-                for (String line : msg.split("\n")) m.player.displayClientMessage(Component.literal(line), false);
+                for (String line : msg.split("\n")) m.player.displayClientMessage(NeoChatText.of(line), false);
             });
         });
         CurrencyParser parser = CurrencyParser.createDefault();
@@ -181,37 +181,37 @@ public final class DtLedgerNeoForge {
                 //   ModUpdater 에 1시간 쿨다운이 내장돼 있어 GitHub 비인증 한도(시간당 60회)는 걱정 없다.
                 var updater = kr.ddingtycoon.dtledger.update.UpdateInstaller.get();
                 if (updater != null) updater.check();
-                mc.player.displayClientMessage(Component.literal("§6§m                                              "), false);
-                mc.player.displayClientMessage(Component.literal("§6§l 빌띵§r§f  새 버전 §a§l" + release.version()
+                mc.player.displayClientMessage(NeoChatText.of("§6§m                                              "), false);
+                mc.player.displayClientMessage(NeoChatText.of("§6§l 빌띵§r§f  새 버전 §a§l" + release.version()
                         + "§r §7(현재 " + current + ")"), false);
                 if (release.notes() != null && !release.notes().isBlank()) {
-                    mc.player.displayClientMessage(Component.literal("§7   " + release.notes()), false);
+                    mc.player.displayClientMessage(NeoChatText.of("§7   " + release.notes()), false);
                 }
                 String url = release.url();
                 if (url != null && (url.startsWith("https://") || url.startsWith("http://"))) {
-                    mc.player.displayClientMessage(Component.literal("")
-                            .append(Component.literal("§b§n » 다운로드 (여기 클릭)")
+                    mc.player.displayClientMessage(NeoChatText.of("")
+                            .append(NeoChatText.of("§b§n » 다운로드 (여기 클릭)")
                                     .withStyle(st -> st
                                             .withClickEvent(new net.minecraft.network.chat.ClickEvent(
                                                     net.minecraft.network.chat.ClickEvent.Action.OPEN_URL, url))
                                             .withHoverEvent(new net.minecraft.network.chat.HoverEvent(
                                                     net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
-                                                    Component.literal("§7" + url)))))
-                            .append(Component.literal("§r§8   · 기존 파일 삭제 후 교체")),
+                                                    NeoChatText.of("§7" + url)))))
+                            .append(NeoChatText.of("§r§8   · 기존 파일 삭제 후 교체")),
                             false);
                 }
                 // 자동 설치가 가능한 환경이면 한 줄 더. 클릭은 '확인 화면'을 열 뿐,
                 // 바로 받지 않는다 — 다운로드는 그 화면에서 동의해야 시작된다.
                 if (kr.ddingtycoon.dtledger.update.UpdateInstaller.available()) {
-                    mc.player.displayClientMessage(Component.literal("")
-                            .append(Component.literal("§a§n » 모드가 대신 설치 (여기 클릭)")
+                    mc.player.displayClientMessage(NeoChatText.of("")
+                            .append(NeoChatText.of("§a§n » 모드가 대신 설치 (여기 클릭)")
                                     .withStyle(st -> st
                                             .withClickEvent(new net.minecraft.network.chat.ClickEvent(
                                                     net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, "/빌띵 업데이트"))
                                             .withHoverEvent(new net.minecraft.network.chat.HoverEvent(
                                                     net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
-                                                    Component.literal("§7확인 화면을 엽니다. 바로 받지 않습니다.")))))
-                            .append(Component.literal("§r§8   · 동의 후 진행")),
+                                                    NeoChatText.of("§7확인 화면을 엽니다. 바로 받지 않습니다.")))))
+                            .append(NeoChatText.of("§r§8   · 동의 후 진행")),
                             false);
                 }
             });
@@ -245,7 +245,7 @@ public final class DtLedgerNeoForge {
                                 Minecraft mc = Minecraft.getInstance();
                                 mc.execute(() -> {
                                     if (mc.player != null) {
-                                        mc.player.displayClientMessage(Component.literal("§6[빌띵] §r" + msg), false);
+                                        mc.player.displayClientMessage(NeoChatText.of("§6[빌띵] §r" + msg), false);
                                     }
                                 });
                             }));

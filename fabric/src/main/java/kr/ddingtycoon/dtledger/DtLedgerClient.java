@@ -70,7 +70,7 @@ public final class DtLedgerClient implements ClientModInitializer {
             MinecraftClient mc = MinecraftClient.getInstance();
             mc.execute(() -> {
                 if (mc.player == null) return;
-                for (String line : msg.split("\n")) mc.player.sendMessage(Text.literal(line), false);
+                for (String line : msg.split("\n")) mc.player.sendMessage(kr.ddingtycoon.dtledger.ui.ChatText.of(line), false);
             });
         });
 
@@ -184,7 +184,7 @@ public final class DtLedgerClient implements ClientModInitializer {
                             msg -> {
                                 MinecraftClient mc = MinecraftClient.getInstance();
                                 mc.execute(() -> {
-                                    if (mc.player != null) mc.player.sendMessage(Text.literal("§6[빌띵] §r" + msg), false);
+                                    if (mc.player != null) mc.player.sendMessage(kr.ddingtycoon.dtledger.ui.ChatText.of("§6[빌띵] §r" + msg), false);
                                 });
                             }));
         } catch (Exception e) {
@@ -207,37 +207,37 @@ public final class DtLedgerClient implements ClientModInitializer {
             //   ModUpdater 에 1시간 쿨다운이 내장돼 있어 GitHub 비인증 한도(시간당 60회)는 걱정 없다.
             var updater = kr.ddingtycoon.dtledger.update.UpdateInstaller.get();
             if (updater != null) updater.check();
-            client.player.sendMessage(Text.literal("§6§m                                              "), false);
-            client.player.sendMessage(Text.literal("§6§l 빌띵§r§f  새 버전 §a§l" + release.version()
+            client.player.sendMessage(kr.ddingtycoon.dtledger.ui.ChatText.of("§6§m                                              "), false);
+            client.player.sendMessage(kr.ddingtycoon.dtledger.ui.ChatText.of("§6§l 빌띵§r§f  새 버전 §a§l" + release.version()
                     + "§r §7(현재 " + current + ")"), false);
             if (release.notes() != null && !release.notes().isBlank()) {
-                client.player.sendMessage(Text.literal("§7   " + release.notes()), false);
+                client.player.sendMessage(kr.ddingtycoon.dtledger.ui.ChatText.of("§7   " + release.notes()), false);
             }
             String url = release.url();
             if (url != null && (url.startsWith("https://") || url.startsWith("http://"))) {
-                client.player.sendMessage(Text.literal("")
-                        .append(Text.literal("§b§n » 다운로드 (여기 클릭)")
+                client.player.sendMessage(kr.ddingtycoon.dtledger.ui.ChatText.of("")
+                        .append(kr.ddingtycoon.dtledger.ui.ChatText.of("§b§n » 다운로드 (여기 클릭)")
                                 .styled(st -> st
                                         .withClickEvent(new net.minecraft.text.ClickEvent(
                                                 net.minecraft.text.ClickEvent.Action.OPEN_URL, url))
                                         .withHoverEvent(new net.minecraft.text.HoverEvent(
                                                 net.minecraft.text.HoverEvent.Action.SHOW_TEXT,
-                                                Text.literal("§7" + url)))))
-                        .append(Text.literal("§r§8   · 기존 파일 삭제 후 교체")),
+                                                kr.ddingtycoon.dtledger.ui.ChatText.of("§7" + url)))))
+                        .append(kr.ddingtycoon.dtledger.ui.ChatText.of("§r§8   · 기존 파일 삭제 후 교체")),
                         false);
             }
             // 자동 설치가 가능한 환경이면 한 줄 더. 클릭은 '확인 화면'을 열 뿐,
             // 바로 받지 않는다 — 다운로드는 그 화면에서 동의해야 시작된다.
             if (kr.ddingtycoon.dtledger.update.UpdateInstaller.available()) {
-                client.player.sendMessage(Text.literal("")
-                        .append(Text.literal("§a§n » 모드가 대신 설치 (여기 클릭)")
+                client.player.sendMessage(kr.ddingtycoon.dtledger.ui.ChatText.of("")
+                        .append(kr.ddingtycoon.dtledger.ui.ChatText.of("§a§n » 모드가 대신 설치 (여기 클릭)")
                                 .styled(st -> st
                                         .withClickEvent(new net.minecraft.text.ClickEvent(
                                                 net.minecraft.text.ClickEvent.Action.RUN_COMMAND, "/빌띵 업데이트"))
                                         .withHoverEvent(new net.minecraft.text.HoverEvent(
                                                 net.minecraft.text.HoverEvent.Action.SHOW_TEXT,
-                                                Text.literal("§7확인 화면을 엽니다. 바로 받지 않습니다.")))))
-                        .append(Text.literal("§r§8   · 동의 후 진행")),
+                                                kr.ddingtycoon.dtledger.ui.ChatText.of("§7확인 화면을 엽니다. 바로 받지 않습니다.")))))
+                        .append(kr.ddingtycoon.dtledger.ui.ChatText.of("§r§8   · 동의 후 진행")),
                         false);
             }
         }));

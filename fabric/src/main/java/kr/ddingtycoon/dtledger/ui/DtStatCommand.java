@@ -104,7 +104,7 @@ public final class DtStatCommand {
     private int report(FabricClientCommandSource src) {
         send(src, copyReport());
         String url = kr.ddingtycoon.dtledger.core.ActivityLog.REPORT_FORM_URL;
-        src.sendFeedback(net.minecraft.text.Text.literal("§b§n » 제보·건의 폼 열기 (여기 클릭)")
+        src.sendFeedback(ChatText.of("§b§n » 제보·건의 폼 열기 (여기 클릭)")
                 .styled(st -> st.withClickEvent(new net.minecraft.text.ClickEvent(
                         net.minecraft.text.ClickEvent.Action.OPEN_URL, url))));
         return 1;
@@ -341,7 +341,7 @@ public final class DtStatCommand {
             if (screen != null) {
                 mc.setScreen(screen);
             } else {
-                src.sendFeedback(Text.literal("§cYACL 설정 화면을 열 수 없습니다. config/dtledger/config.json 을 직접 편집하세요."));
+                src.sendFeedback(ChatText.of("§cYACL 설정 화면을 열 수 없습니다. config/dtledger/config.json 을 직접 편집하세요."));
             }
         });
         return 1;
@@ -380,6 +380,6 @@ public final class DtStatCommand {
     }
 
     private void send(FabricClientCommandSource src, String msg) {
-        src.sendFeedback(Text.literal(msg));
+        src.sendFeedback(ChatText.of(msg));
     }
 }
