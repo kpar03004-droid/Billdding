@@ -12,6 +12,17 @@ import net.minecraft.util.Identifier;
  * 색 팔레트는 Claude Design 스펙(양피지 라이트 테마).
  */
 public final class GuiTex {
+
+    /**
+     * 입력칸 글자 그림자 끄기. 바닐라 입력칸은 그림자를 켠 채로만 그려서 양피지 위에서
+     * 글자가 두 겹으로 보인다 → 스타일의 그림자 색을 완전 투명으로 준다(1.21.4 shadow_color).
+     * ※ 끝에 붙는 깜빡이는 "_" 커서는 바닐라가 따로 그려 그림자가 남는다.
+     */
+    public static void noShadow(net.minecraft.client.gui.widget.TextFieldWidget field) {
+        net.minecraft.text.Style style = net.minecraft.text.Style.EMPTY.withShadowColor(0);
+        field.setRenderTextProvider((text, firstIndex) ->
+                net.minecraft.text.OrderedText.styledForwardsVisitedString(text, style));
+    }
     private GuiTex() {}
 
     // ── 양피지(light) 팔레트 ──

@@ -78,6 +78,24 @@ public final class DailyAggregator {
         return out;
     }
 
+    /** 장부 날짜 from~to(양끝 포함)의 원본 레코드 — 분야 상세 화면용. 원장(저장분)에서 읽는다. */
+    public List<TransactionRecord> records(LocalDate from, LocalDate to) {
+        List<TransactionRecord> out = new ArrayList<>();
+        // 리셋 시각 시프트로 경계 레코드가 옆 달 파일에 있을 수 있어 앞뒤 하루씩 넓혀 읽는다
+        YearMonth last = YearMonth.from(to.plusDays(1));
+        for (YearMonth ym = YearMonth.from(from.minusDays(1)); !ym.isAfter(last); ym = ym.plusMonths(1)) {
+            for (TransactionRecord r : store.loadMonth(ym)) {
+                LocalDate d = LedgerDates.ledgerDate(r.timestamp, config.dayResetHour);
+                if (!d.isBefore(from) && !d.isAfter(to)) out.add(r);
+            }
+        }
+        return out;
+    }
+
+    public int resetHour() {
+        return config.dayResetHour;
+    }
+
     public List<TransactionRecord> pending() {
         return pending;
     }

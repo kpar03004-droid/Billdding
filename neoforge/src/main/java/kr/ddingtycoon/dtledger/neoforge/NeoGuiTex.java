@@ -6,6 +6,17 @@ import net.minecraft.resources.ResourceLocation;
 
 /** 번들 GUI 텍스처(양피지) 렌더 헬퍼 + 카테고리 아이콘 매핑 (NeoForge 판, fabric GuiTex 와 동일). */
 public final class NeoGuiTex {
+
+    /**
+     * 입력칸 글자 그림자 끄기. 바닐라 입력칸은 그림자를 켠 채로만 그려서 양피지 위에서
+     * 글자가 두 겹으로 보인다 → 스타일의 그림자 색을 완전 투명으로 준다(1.21.4 shadow_color).
+     * ※ 끝에 붙는 깜빡이는 "_" 커서는 바닐라가 따로 그려 그림자가 남는다.
+     */
+    public static void noShadow(net.minecraft.client.gui.components.EditBox field) {
+        net.minecraft.network.chat.Style style = net.minecraft.network.chat.Style.EMPTY.withShadowColor(0);
+        field.setFormatter((text, firstIndex) ->
+                net.minecraft.util.FormattedCharSequence.forward(text, style));
+    }
     private NeoGuiTex() {}
 
     public static final int TEXT     = 0xFF4A3420;

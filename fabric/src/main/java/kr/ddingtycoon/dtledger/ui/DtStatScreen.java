@@ -46,6 +46,7 @@ public final class DtStatScreen extends Screen {
     /** 창을 닫았다 열어도 보던 탭 유지(게임 켜 있는 동안). 관리 탭 수정 모드는 이어가지 않는다. */
     private static int lastTab = 0;
     private TexButton copyButton;
+    private TexButton byCatButton;
     /** 새로워진 점 카드 영역 — 클릭하면 닫는다(렌더에서 갱신). */
     private int whatsNewBottom = -1;
 
@@ -78,6 +79,31 @@ public final class DtStatScreen extends Screen {
     private TexButton sOpacityDown;
     private TexButton sOpacityUp;
     private TexButton sReport;
+
+    // 통계([통계] 버튼 또는 오늘 탭 카테고리 줄 클릭) — statsOpen 이면 오늘 탭 자리에 그린다.
+    // detailCat 이 null 이면 분야 목록, 있으면 그 분야 하나.
+    private boolean statsOpen;
+    private String detailCat;
+    private boolean detailByItem = true; // 유저상점·플리마켓 판매를 물건 분야에 합칠지
+    private int fromAgo = 6, toAgo = 0; // 며칠 전 ~ 며칠 전(양끝 포함)
+    private int statsScroll;
+    private kr.ddingtycoon.dtledger.aggregate.CategoryView.Result detailCache;
+    private List<Map.Entry<String, long[]>> listCache;
+    private long statsCacheAt;
+    private TexButton dBack, dMode, dOlder, dNewer;
+    /** 상세 아래쪽: 0=날짜별 1=수입 내역 2=지출 내역 */
+    private int listMode;
+    /** 누를 수 있는 글자 영역 {x0, x1, y, 바꿀 listMode} — 상세 합계 줄·내역 제목 줄 */
+    private final List<int[]> textHits = new java.util.ArrayList<>();
+    /** 통계 목록 줄 {y, 분야} */
+    private final List<Object[]> statRows = new java.util.ArrayList<>();
+    private int mouseXNow, mouseYNow;
+    private static final int VISIBLE_STATS = 12;
+    private final List<TexButton> dPresets = new java.util.ArrayList<>();
+    private static final String[] PRESET_NAMES = {"오늘", "어제", "3일", "7일", "30일"};
+    private static final int[][] PRESETS = {{0, 0}, {1, 1}, {2, 0}, {6, 0}, {29, 0}};
+    /** 오늘 탭 카테고리 줄 위치(렌더에서 갱신) — 클릭하면 그 분야 상세. */
+    private final List<Object[]> catHits = new java.util.ArrayList<>();
 
     private static final int VISIBLE_PENDING = 12; // 내역 탭 한 화면 행 수(나머지는 휠 스크롤)
     private int pendingScroll;
@@ -112,12 +138,16 @@ public final class DtStatScreen extends Screen {
         // 오늘·주간 정산 복사(디스코드 붙여넣기용) — Ctrl+C 와 같은 동작
         copyButton = new TexButton(x + PAD + 34, TOP + 20, 40, 14, Text.literal("복사"), this::copyShare);
         addDrawableChild(copyButton);
+        // 분야별 기간 보기 입구 — 오늘 기록이 없어도 들어갈 수 있게(카테고리 줄 클릭과 같은 화면)
+        byCatButton = new TexButton(x + PAD + 78, TOP + 20, 44, 14, Text.literal("통계"), this::toggleStats);
+        addDrawableChild(byCatButton);
 
         // 금고 탭 위젯
         vaultInput = new TextFieldWidget(this.textRenderer, x + PAD + 2, cy + 16, 146, 14, Text.literal("금고 잔액"));
         vaultInput.setMaxLength(11);
         vaultInput.setDrawsBackground(false);
         vaultInput.setEditableColor(GuiTex.TEXT);
+        GuiTex.noShadow(vaultInput);
         if (vault.isSet()) vaultInput.setText(String.valueOf(vault.balance()));
         addDrawableChild(vaultInput);
 
@@ -136,18 +166,21 @@ public final class DtStatScreen extends Screen {
         mAmount.setMaxLength(15);
         mAmount.setDrawsBackground(false);
         mAmount.setEditableColor(GuiTex.TEXT);
+        GuiTex.noShadow(mAmount);
         addDrawableChild(mAmount);
 
         mLabel = new TextFieldWidget(this.textRenderer, x + PAD + 118, cy + 14, W - PAD * 2 - 120, 14, Text.literal("설명"));
         mLabel.setMaxLength(40);
         mLabel.setDrawsBackground(false);
         mLabel.setEditableColor(GuiTex.TEXT);
+        GuiTex.noShadow(mLabel);
         addDrawableChild(mLabel);
 
         mCategory = new TextFieldWidget(this.textRenderer, x + PAD + 118, cy + 14, 96, 14, Text.literal("카테고리"));
         mCategory.setMaxLength(20);
         mCategory.setDrawsBackground(false);
         mCategory.setEditableColor(GuiTex.TEXT);
+        GuiTex.noShadow(mCategory);
         addDrawableChild(mCategory);
         mSave = new TexButton(x + PAD, cy + 36, 150, 18, Text.literal("수정 저장"), this::saveEdit);
         addDrawableChild(mSave);
@@ -173,6 +206,7 @@ public final class DtStatScreen extends Screen {
         mDate.setMaxLength(10);
         mDate.setDrawsBackground(false);
         mDate.setEditableColor(GuiTex.TEXT);
+        GuiTex.noShadow(mDate);
         // placeholder 는 그림자가 붙어 양피지 위에서 글자가 두 겹으로 보여 쓰지 않음 —
         // 형식 안내는 위 라벨에 넣는다(2026-07-28).
         addDrawableChild(mDate);
@@ -202,7 +236,119 @@ public final class DtStatScreen extends Screen {
         });
         addDrawableChild(sReport);
 
+        // 통계 위젯
+        dBack = new TexButton(x + PAD, cy, 44, 16, Text.literal("‹ 목록"), () -> {
+            detailCat = null;
+            listMode = 0;
+            invalidateStats();
+            updateWidgets();
+        });
+        addDrawableChild(dBack);
+        dMode = new TexButton(x + W - PAD - 150, cy, 150, 16, Text.literal(""), () -> {
+            detailByItem = !detailByItem;
+            statsScroll = 0;
+            invalidateStats();
+            updateWidgets();
+        });
+        addDrawableChild(dMode);
+        dPresets.clear();
+        for (int i = 0; i < PRESETS.length; i++) {
+            final int[] p = PRESETS[i];
+            TexButton b = new TexButton(x + PAD + i * 44, cy + 22, 40, 16, Text.literal(PRESET_NAMES[i]), () -> {
+                fromAgo = p[0];
+                toAgo = p[1];
+                statsScroll = 0;
+                invalidateStats();
+            });
+            dPresets.add(b);
+            addDrawableChild(b);
+        }
+        dOlder = new TexButton(x + PAD + 222, cy + 22, 54, 16, Text.literal("◀ 하루 전"), () -> shiftPeriod(1));
+        addDrawableChild(dOlder);
+        dNewer = new TexButton(x + PAD + 280, cy + 22, 54, 16, Text.literal("하루 뒤 ▶"), () -> shiftPeriod(-1));
+        addDrawableChild(dNewer);
+
         updateWidgets();
+    }
+
+    private void invalidateStats() {
+        detailCache = null;
+        listCache = null;
+    }
+
+    /** [통계] — 분야 목록(최근 7일)을 연다. 열려 있으면 닫는다. */
+    private void toggleStats() {
+        boolean wasOpen = statsOpen && tab == 0;
+        switchTab(0);
+        if (wasOpen) return;
+        statsOpen = true;
+        fromAgo = 6;
+        toAgo = 0;
+        statsScroll = 0;
+        invalidateStats();
+        updateWidgets();
+    }
+
+    /**
+     * 분야 하나를 연다. 오늘 탭에서 바로 왔으면 최근 7일로, 목록에서 왔으면 보던 기간 그대로.
+     * 판매처 카테고리(유저상점 등)를 눌렀으면 "따로 봄"이어야 그 분야가 보인다.
+     */
+    private void openDetail(String cat) {
+        if (!statsOpen) {
+            fromAgo = 6;
+            toAgo = 0;
+        }
+        statsOpen = true;
+        detailCat = cat;
+        if (kr.ddingtycoon.dtledger.aggregate.CategoryView.VENUES.contains(cat)) detailByItem = false;
+        listMode = 0;
+        invalidateStats();
+        updateWidgets();
+    }
+
+    /** 기간 창을 길이 그대로 하루씩 옮긴다(+1 = 과거로). 미래로는 못 간다. */
+    private void shiftPeriod(int days) {
+        if (toAgo + days < 0 || fromAgo + days > 365) return;
+        fromAgo += days;
+        toAgo += days;
+        statsScroll = 0;
+        invalidateStats();
+    }
+
+    private java.time.LocalDate statsFrom() {
+        return LedgerDates.today(config.dayResetHour).minusDays(fromAgo);
+    }
+
+    private java.time.LocalDate statsTo() {
+        return LedgerDates.today(config.dayResetHour).minusDays(toAgo);
+    }
+
+    private java.util.function.Function<TransactionRecord, java.time.LocalDate> dateOf() {
+        return r -> LedgerDates.ledgerDate(r.timestamp, config.dayResetHour);
+    }
+
+    /** 1초마다 다시 계산(그 사이 새 거래 반영). */
+    private boolean statsStale() {
+        long now = System.currentTimeMillis();
+        if (now - statsCacheAt <= 1_000) return false;
+        statsCacheAt = now;
+        return true;
+    }
+
+    private kr.ddingtycoon.dtledger.aggregate.CategoryView.Result detail() {
+        if (detailCache == null || statsStale()) {
+            detailCache = kr.ddingtycoon.dtledger.aggregate.CategoryView.of(aggregator.records(statsFrom(), statsTo()), detailCat,
+                    detailByItem, statsFrom(), statsTo(), dateOf());
+        }
+        return detailCache;
+    }
+
+    private List<Map.Entry<String, long[]>> statsList() {
+        if (listCache == null || statsStale()) {
+            listCache = kr.ddingtycoon.dtledger.aggregate.CategoryView.totals(aggregator.records(statsFrom(), statsTo()), detailByItem,
+                    statsFrom(), statsTo(), dateOf());
+        }
+        return listCache;
     }
 
     private void switchTab(int idx) {
@@ -210,11 +356,15 @@ public final class DtStatScreen extends Screen {
         lastTab = idx == 4 ? 0 : idx; // 관리 탭은 입력 중 상태라 다음에 열 때 이어가지 않는다
         resetArmedKind = 0; // 탭 이동 시 확인 대기 취소
         if (editing != null) cancelEdit();
+        statsOpen = false;
+        detailCat = null;
         updateWidgets();
     }
 
     private void copyShare() {
-        String text = tab == 1 ? kr.ddingtycoon.dtledger.aggregate.ShareText.week(aggregator.lastDays(7))
+        String text = statsOpen && detailCat != null ? kr.ddingtycoon.dtledger.aggregate.CategoryView.share(detail())
+                : statsOpen ? kr.ddingtycoon.dtledger.aggregate.CategoryView.shareList(statsList(), statsFrom(), statsTo())
+                : tab == 1 ? kr.ddingtycoon.dtledger.aggregate.ShareText.week(aggregator.lastDays(7))
                 : kr.ddingtycoon.dtledger.aggregate.ShareText.day(aggregator.today());
         this.client.keyboard.setClipboard(text);
         copyButton.setMessage(Text.literal("복사됨"));
@@ -240,6 +390,19 @@ public final class DtStatScreen extends Screen {
         if (copyButton != null) {
             copyButton.visible = tab == 0 || tab == 1;
             copyButton.setMessage(Text.literal("복사"));
+        }
+        if (byCatButton != null) {
+            byCatButton.visible = tab == 0 || tab == 1;
+            byCatButton.setMessage(Text.literal(tab == 0 && statsOpen ? "닫기" : "통계"));
+        }
+        boolean st = tab == 0 && statsOpen;
+        if (dBack != null) {
+            dBack.visible = st && detailCat != null;
+            dMode.visible = st;
+            dMode.setMessage(Text.literal(detailByItem ? "유저상점 판매: 분야에 합침" : "유저상점 판매: 따로 봄"));
+            dOlder.visible = st;
+            dNewer.visible = st;
+            for (TexButton b : dPresets) b.visible = st;
         }
         boolean vaultEditor = tab == 3 && (!vault.isSet() || editingVault);
         vaultInput.visible = vaultEditor; // ClickableWidget 공통 필드 — setVisible 버전차 회피
@@ -389,7 +552,34 @@ public final class DtStatScreen extends Screen {
                 }
             }
         }
-        if (tab == 0 && button == 0 && mouseY < whatsNewBottom && mouseY >= TOP + 62
+        if (tab == 0 && statsOpen && button == 0) {
+            if (detailCat == null) {
+                for (Object[] row : statRows) {
+                    int ry = (int) row[0];
+                    if (mouseY >= ry && mouseY < ry + ROW_H && mouseX >= panelX() + PAD && mouseX <= panelX() + W - PAD) {
+                        openDetail((String) row[1]);
+                        return true;
+                    }
+                }
+            } else {
+                for (int[] h : textHits) {
+                    if (mouseX >= h[0] && mouseX < h[1] && mouseY >= h[2] - 1 && mouseY < h[2] + 10) {
+                        listMode = h[3] == 0 || listMode == h[3] ? 0 : h[3];
+                        return true;
+                    }
+                }
+            }
+        }
+        if (tab == 0 && button == 0 && !statsOpen) {
+            for (Object[] hit : catHits) {
+                int hy = (int) hit[0];
+                if (mouseY >= hy && mouseY < hy + ROW_H && mouseX >= panelX() + PAD && mouseX <= panelX() + W - PAD) {
+                    openDetail((String) hit[1]);
+                    return true;
+                }
+            }
+        }
+        if (tab == 0 && !statsOpen && button == 0 && mouseY < whatsNewBottom && mouseY >= TOP + 62
                 && WhatsNew.unseen(config.lastSeenWhatsNew)) {
             config.lastSeenWhatsNew = WhatsNew.VERSION;
             config.save();
@@ -397,7 +587,7 @@ public final class DtStatScreen extends Screen {
         }
         // 잔고 대조 경고 줄 클릭 = "알고 넘어감"(기준을 지금으로)
         Long gap = WalletCheck.LIVE.unexplained();
-        if (tab == 0 && button == 0 && gap != null && gap != 0
+        if (tab == 0 && !statsOpen && button == 0 && gap != null && gap != 0
                 && mouseY >= walletLineY - 2 && mouseY < walletLineY + 11) {
             WalletCheck.LIVE.acknowledge(System.currentTimeMillis());
             return true;
@@ -466,6 +656,8 @@ public final class DtStatScreen extends Screen {
 
     @Override
     public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
+        mouseXNow = mouseX; // 통계 화면의 밑줄·줄 강조용
+        mouseYNow = mouseY;
         ctx.fill(0, 0, this.width, this.height, DIM);
         drawPanel(ctx);
     }
@@ -484,7 +676,11 @@ public final class DtStatScreen extends Screen {
 
         int cy = TOP + 62;
         switch (tab) {
-            case 0 -> renderToday(ctx, x, cy);
+            case 0 -> {
+                if (statsOpen && detailCat != null) renderDetail(ctx, x, cy);
+                else if (statsOpen) renderStatsList(ctx, x, cy);
+                else renderToday(ctx, x, cy);
+            }
             case 1 -> renderWeek(ctx, x, cy);
             case 2 -> renderPending(ctx, x, cy);
             case 3 -> renderVault(ctx, x, cy);
@@ -496,6 +692,8 @@ public final class DtStatScreen extends Screen {
     private int contentHeight() {
         return switch (tab) {
             case 0 -> {
+                if (statsOpen && detailCat != null) yield detailHeight(detail());
+                if (statsOpen) yield statsListHeight();
                 DailyBucket b = aggregator.today();
                 int cats = shownCats(b.incomeByCategory) + shownCats(b.expenseByCategory);
                 yield 64 + (cats > 0 ? 16 + cats * ROW_H : 0) + (showTransfers(b) ? 16 : 0) + 14 + whatsNewHeight();
@@ -566,6 +764,7 @@ public final class DtStatScreen extends Screen {
         y += 16;
 
         int cats = shownCats(b.incomeByCategory) + shownCats(b.expenseByCategory);
+        catHits.clear();
         if (cats > 0) {
             GuiTex.tileH(ctx, "tex_divider", left, right, y, 48, 6);
             y += 6;
@@ -604,6 +803,168 @@ public final class DtStatScreen extends Screen {
         ctx.drawText(textRenderer, textRenderer.trimToWidth(line, right - left), left, y, color, false);
     }
 
+    // ── 통계 ──
+    private String periodText() {
+        java.time.LocalDate from = statsFrom(), to = statsTo();
+        return from.equals(to) ? from + "  (하루)" : from + " ~ " + to + "  (" + (fromAgo - toAgo + 1) + "일)";
+    }
+
+    private int statsListHeight() {
+        int n = statsList().size();
+        return 44 + 12 + 14 + 6 + (n == 0 ? 14 : Math.min(n, VISIBLE_STATS) * ROW_H) + (n > VISIBLE_STATS ? 12 : 0) + 4;
+    }
+
+    private void renderStatsList(DrawContext ctx, int x, int y) {
+        List<Map.Entry<String, long[]>> rows = statsList();
+        int left = x + PAD, right = x + W - PAD;
+        ctx.drawText(textRenderer, "분야별 수익", left, y + 4, GuiTex.TITLE, false);
+        y += 44;
+        ctx.drawText(textRenderer, periodText(), left, y, GuiTex.LABEL, false);
+        y += 12;
+        long in = 0, out = 0, max = 1;
+        for (var e : rows) {
+            in += e.getValue()[0];
+            out += e.getValue()[1];
+            max = Math.max(max, Math.max(e.getValue()[0], e.getValue()[1]));
+        }
+        String sum = "수입 " + GoldFormat.format(in) + "  ·  지출 " + GoldFormat.format(out)
+                + "  ·  순익 " + GoldFormat.signed(in - out);
+        ctx.drawText(textRenderer, textRenderer.trimToWidth(sum, right - left), left, y,
+                in - out >= 0 ? GuiTex.GREEN : GuiTex.RED, false);
+        y += 14;
+        GuiTex.tileH(ctx, "tex_divider", left, right, y, 48, 6);
+        y += 6;
+
+        statRows.clear();
+        if (rows.isEmpty()) {
+            ctx.drawText(textRenderer, "이 기간에는 기록이 없어요", left, y + 2, GuiTex.LABEL, false);
+            return;
+        }
+        int n = rows.size();
+        statsScroll = Math.max(0, Math.min(statsScroll, Math.max(0, n - VISIBLE_STATS)));
+        int end = Math.min(n, statsScroll + VISIBLE_STATS);
+        boolean scrollable = n > VISIBLE_STATS;
+        for (int i = statsScroll; i < end; i++) {
+            String cat = rows.get(i).getKey();
+            long[] v = rows.get(i).getValue();
+            statRows.add(new Object[]{y, cat});
+            boolean hover = mouseYNow >= y && mouseYNow < y + ROW_H && mouseXNow >= left && mouseXNow <= right;
+            if (hover) ctx.fill(left - 2, y, right + 2, y + ROW_H, 0x22000000);
+            ItemIcons.drawCategory(ctx, cat, left, y, 0.75f);
+            ctx.drawText(textRenderer, textRenderer.trimToWidth(cat, 60), left + 15, y + 2, GuiTex.LABEL, false);
+            int barLeft = left + 80, barMax = right - barLeft - 130;
+            ctx.fill(barLeft, y + 3, barLeft + barMax, y + 9, GuiTex.TRACK);
+            if (v[0] > 0) ctx.fill(barLeft, y + 3, barLeft + (int) Math.max(2, barMax * v[0] / max), y + 6, GuiTex.GREEN);
+            if (v[1] > 0) ctx.fill(barLeft, y + 6, barLeft + (int) Math.max(2, barMax * v[1] / max), y + 9, GuiTex.RED);
+            // 오른쪽 끝: 수입(있으면) — 그 왼쪽: 지출(있으면)
+            int ax = right;
+            if (v[0] > 0) {
+                String a = "+" + GoldFormat.format(v[0]);
+                ax -= textRenderer.getWidth(a);
+                ctx.drawText(textRenderer, a, ax, y + 2, GuiTex.GREEN, false);
+                ax -= 6;
+            }
+            if (v[1] > 0) {
+                String a = "-" + GoldFormat.format(v[1]);
+                ax -= textRenderer.getWidth(a);
+                ctx.drawText(textRenderer, a, ax, y + 2, GuiTex.RED, false);
+            }
+            y += ROW_H;
+        }
+        if (scrollable) {
+            ctx.drawText(textRenderer, (statsScroll + 1) + "–" + end + " / " + n + "  · 휠 스크롤", left, y + 2, GuiTex.LABEL, false);
+        }
+    }
+
+    private int detailHeight(kr.ddingtycoon.dtledger.aggregate.CategoryView.Result r) {
+        int body;
+        if (listMode != 0) body = 14 + Math.max(1, (listMode == 1 ? r.top() : r.spent()).size()) * ROW_H;
+        else body = r.count() == 0 || r.days() > 7 ? 14 : r.days() * ROW_H;
+        return 44 + 12 + 14 + 6 + body + 4;
+    }
+
+    /** 누를 수 있는 글자 — 마우스를 올리면 밑줄. @return 다음 글자 x */
+    private int clickText(DrawContext ctx, String text, int x, int y, int color, int mode) {
+        int w = textRenderer.getWidth(text);
+        ctx.drawText(textRenderer, text, x, y, color, false);
+        if (mouseXNow >= x && mouseXNow < x + w && mouseYNow >= y - 1 && mouseYNow < y + 10) {
+            ctx.fill(x, y + 9, x + w, y + 10, color);
+        }
+        textHits.add(new int[]{x, x + w, y, mode});
+        return x + w;
+    }
+
+    private void renderDetail(DrawContext ctx, int x, int y) {
+        kr.ddingtycoon.dtledger.aggregate.CategoryView.Result r = detail();
+        int left = x + PAD, right = x + W - PAD;
+        ItemIcons.drawCategory(ctx, r.category(), left + 50, y + 2, 0.75f);
+        ctx.drawText(textRenderer, textRenderer.trimToWidth(r.category(), 110), left + 66, y + 4, GuiTex.TITLE, false);
+        y += 44;
+        ctx.drawText(textRenderer, periodText(), left, y, GuiTex.LABEL, false);
+        y += 12;
+
+        // 합계 줄 — 수입·지출 글자를 누르면 아래가 그 내역으로 바뀐다
+        textHits.clear();
+        int sx = clickText(ctx, "수입 " + GoldFormat.format(r.income()) + (listMode == 1 ? " ▾" : " ▸"),
+                left, y, GuiTex.GREEN, 1);
+        ctx.drawText(textRenderer, "  ·  ", sx, y, GuiTex.LABEL, false);
+        sx += textRenderer.getWidth("  ·  ");
+        sx = clickText(ctx, "지출 " + GoldFormat.format(r.expense()) + (listMode == 2 ? " ▾" : " ▸"),
+                sx, y, GuiTex.RED, 2);
+        ctx.drawText(textRenderer, "  ·  순익 " + GoldFormat.signed(r.net()), sx, y,
+                r.net() >= 0 ? GuiTex.GREEN : GuiTex.RED, false);
+        y += 14;
+        GuiTex.tileH(ctx, "tex_divider", left, right, y, 48, 6);
+        y += 6;
+
+        if (listMode != 0) {
+            itemList(ctx, r, listMode == 1 ? r.top() : r.spent(), listMode == 1, left, right, y);
+        } else if (r.count() == 0) {
+            ctx.drawText(textRenderer, "이 기간에는 기록이 없어요", left, y + 2, GuiTex.LABEL, false);
+        } else if (r.days() > 7) { // 30일 막대는 화면을 넘친다
+            ctx.drawText(textRenderer, "기간이 길어 날짜별은 생략했어요 · 수입·지출을 누르면 내역이 나와요",
+                    left, y + 2, GuiTex.LABEL, false);
+        } else {
+            long max = 1;
+            for (long[] d : r.byDay().values()) max = Math.max(max, Math.max(d[0], d[1]));
+            for (var e : r.byDay().entrySet()) {
+                long[] d = e.getValue();
+                ctx.drawText(textRenderer, e.getKey().format(DAY_FMT), left, y + 2, GuiTex.LABEL, false);
+                int barLeft = left + 40, barMax = right - barLeft - 90;
+                ctx.fill(barLeft, y + 3, barLeft + barMax, y + 9, GuiTex.TRACK);
+                if (d[0] > 0) ctx.fill(barLeft, y + 3, barLeft + (int) Math.max(2, barMax * d[0] / max), y + 6, GuiTex.GREEN);
+                if (d[1] > 0) ctx.fill(barLeft, y + 6, barLeft + (int) Math.max(2, barMax * d[1] / max), y + 9, GuiTex.RED);
+                boolean empty = d[0] == 0 && d[1] == 0; // 거래 없는 날은 회색 "-"
+                String v = empty ? "-" : GoldFormat.signed(d[0] - d[1]);
+                ctx.drawText(textRenderer, v, right - textRenderer.getWidth(v), y + 2,
+                        empty ? GuiTex.LABEL : d[0] - d[1] >= 0 ? GuiTex.GREEN : GuiTex.RED, false);
+                y += ROW_H;
+            }
+        }
+    }
+
+    /** 수입 내역 / 지출 내역(금액 큰 순, 최대 10줄). 제목 줄 오른쪽 "‹ 날짜별"로 돌아간다. */
+    private void itemList(DrawContext ctx, kr.ddingtycoon.dtledger.aggregate.CategoryView.Result r,
+                          List<kr.ddingtycoon.dtledger.aggregate.CategoryView.Item> items, boolean income, int left, int right, int y) {
+        ctx.drawText(textRenderer, income ? "수입 내역" : "지출 내역", left, y + 1, GuiTex.LABEL, false);
+        String back = "‹ 날짜별";
+        clickText(ctx, back, right - textRenderer.getWidth(back), y + 1, GuiTex.TEXT, 0);
+        y += 14;
+        if (items.isEmpty()) {
+            ctx.drawText(textRenderer, income ? "이 기간에 들어온 돈이 없어요" : "이 기간에 나간 돈이 없어요",
+                    left, y + 2, GuiTex.LABEL, false);
+            return;
+        }
+        for (var it : items) {
+            ItemIcons.drawRecord(ctx, it.label(), r.category(), left, y, 0.75f);
+            String amt = (income ? "+" : "-") + GoldFormat.format(it.amount()) + "  (" + it.count() + "건)";
+            ctx.drawText(textRenderer, textRenderer.trimToWidth(it.label(), right - left - 20 - textRenderer.getWidth(amt) - 8),
+                    left + 15, y + 2, GuiTex.TEXT, false);
+            ctx.drawText(textRenderer, amt, right - textRenderer.getWidth(amt), y + 2, income ? GuiTex.GREEN : GuiTex.RED, false);
+            y += ROW_H;
+        }
+    }
+
     /** 오늘 탭 잔고 대조 줄의 y — 클릭 판정용(렌더에서 갱신). */
     private int walletLineY = -1;
 
@@ -612,6 +973,7 @@ public final class DtStatScreen extends Screen {
         int shown = 0;
         for (Map.Entry<String, Long> e : sortDesc(map).entrySet()) {
             if (shown++ >= 5) break;
+            catHits.add(new Object[]{y, e.getKey()});
             ItemIcons.drawCategory(ctx, e.getKey(), left, y, 0.75f); // 12px 창작 아이콘(카테고리 대표)
             int labelLeft = left + 15;
             String label = textRenderer.trimToWidth(e.getKey(), 60);
@@ -754,6 +1116,10 @@ public final class DtStatScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double horiz, double vert) {
+        if (tab == 0 && statsOpen && detailCat == null) {
+            statsScroll -= (int) Math.signum(vert);
+            return true;
+        }
         if (tab == 2) {
             pendingScroll -= (int) Math.signum(vert);
             int maxScroll = Math.max(0, groupedPending().size() - VISIBLE_PENDING);
